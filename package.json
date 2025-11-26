@@ -1,24 +1,19 @@
 {
-  "type": "module",
-  "name": "wordpress-mcp-server",
-  "version": "2.2.0",
-  "description": "WordPress MCP Server - 36 REST API endpoints + HTTP GET API + Special Pages Retrieval",
+  "name": "wordpress-mcp",
+  "version": "3.0.0",
+  "description": "WordPress MCP Server with PostgreSQL client management",
   "main": "wordpress-mcp-server.js",
+  "type": "module",
   "scripts": {
-    "start": "node wordpress-mcp-server.js"
+    "start": "node wordpress-mcp-server.js",
+    "dev": "node --watch wordpress-mcp-server.js"
   },
-  "keywords": [
-    "wordpress",
-    "mcp",
-    "rest-api",
-    "http-api",
-    "cms",
-    "content-management"
-  ],
   "dependencies": {
-    "form-data": "^4.0.0"
+    "pg": "^8.11.3"
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "author": "Strudel Marketing",
+  "license": "MIT"
 }
