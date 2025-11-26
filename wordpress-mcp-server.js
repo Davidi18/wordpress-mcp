@@ -1,15 +1,160 @@
 #!/usr/bin/env node
-// WordPress MCP Server - Enhanced with 35 endpoints
-// Includes: Posts, Pages, Media (with update!), Comments, Users, Taxonomy, Site Info
-// Now with Multi-Client Support!
+// WordPress MCP Server v3.0.0 - PostgreSQL Integration + ENV Fallback
+// Now reads clients from Agency OS database!
+// Includes: Posts, Pages, Media, Comments, Users, Taxonomy, Site Info
+// Multi-Client Support with dynamic PostgreSQL loading
 
 import http from 'http';
+import pg from 'pg';
 
 const PORT = parseInt(process.env.PORT || '8080');
-const API_KEY = process.env.API_KEY; // Shared API key for all clients
+const API_KEY = process.env.API_KEY;
 
-// Multi-client configuration support
-function getClientConfig(clientId = null) {
+// PostgreSQL Configuration (Agency OS via Tailscale)
+const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:password@100.98.146.89:5432/postgres';
+
+// Client cache (refreshes every 5 minutes)
+let clientCache = null;
+let clientCacheTime = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// PostgreSQL client
+let pgClient = null;
+
+async function initDatabase() {
+  if (pgClient) return pgClient;
+  
+  try {
+    const { Pool } = pg;
+    pgClient = new Pool({
+      connectionString: DATABASE_URL,
+      max: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    });
+    
+    // Test connection
+    await pgClient.query('SELECT 1');
+    console.log('✅ PostgreSQL connected (Agency OS)');
+    return pgClient;
+  } catch (error) {
+    console.error('⚠️ PostgreSQL connection failed:', error.message);
+    console.log('📋 Falling back to ENV configuration');
+    pgClient = null;
+    return null;
+  }
+}
+
+// Load clients from PostgreSQL
+async function loadClientsFromDB() {
+  const now = Date.now();
+  
+  // Return cached data if still valid
+  if (clientCache && (now - clientCacheTime) < CACHE_TTL) {
+    return clientCache;
+  }
+  
+  const db = await initDatabase();
+  if (!db) return null;
+  
+  try {
+    const result = await db.query(`
+      SELECT 
+        id,
+        name,
+        wordpress_url,
+        wordpress_username,
+        wordpress_app_password,
+        status
+      FROM clients 
+      WHERE wordpress_url IS NOT NULL 
+        AND wordpress_url != ''
+        AND wordpress_username IS NOT NULL
+        AND wordpress_app_password IS NOT NULL
+        AND (deleted_at IS NULL)
+      ORDER BY name
+    `);
+    
+    clientCache = result.rows;
+    clientCacheTime = now;
+    console.log(`📦 Loaded ${clientCache.length} WordPress clients from database`);
+    return clientCache;
+  } catch (error) {
+    console.error('❌ Error loading clients from DB:', error.message);
+    return null;
+  }
+}
+
+// Force refresh cache (useful after updates)
+function invalidateClientCache() {
+  clientCache = null;
+  clientCacheTime = 0;
+  console.log('🔄 Client cache invalidated');
+}
+
+// Extract domain from URL
+function extractDomain(url) {
+  try {
+    // Add protocol if missing
+    if (!url.startsWith('http')) {
+      url = 'https://' + url;
+    }
+    const urlObj = new URL(url);
+    return urlObj.hostname.replace('www.', '');
+  } catch (e) {
+    return url.replace('www.', '').split('/')[0];
+  }
+}
+
+// Get client config - tries DB first, then ENV fallback
+async function getClientConfig(clientId = null) {
+  // Try database first
+  const dbClients = await loadClientsFromDB();
+  
+  if (dbClients && dbClients.length > 0) {
+    // If specific client requested
+    if (clientId) {
+      // Try to find by name (case-insensitive)
+      const client = dbClients.find(c => 
+        c.name.toLowerCase() === clientId.toLowerCase() ||
+        extractDomain(c.wordpress_url) === extractDomain(clientId)
+      );
+      
+      if (client) {
+        const wpUrl = client.wordpress_url.startsWith('http') 
+          ? client.wordpress_url 
+          : `https://${client.wordpress_url}`;
+        
+        return {
+          url: wpUrl,
+          username: client.wordpress_username,
+          password: client.wordpress_app_password,
+          name: client.name,
+          id: client.id,
+          source: 'database'
+        };
+      }
+    }
+    
+    // Return first active client as default
+    const defaultClient = dbClients[0];
+    const wpUrl = defaultClient.wordpress_url.startsWith('http') 
+      ? defaultClient.wordpress_url 
+      : `https://${defaultClient.wordpress_url}`;
+    
+    return {
+      url: wpUrl,
+      username: defaultClient.wordpress_username,
+      password: defaultClient.wordpress_app_password,
+      name: defaultClient.name,
+      id: defaultClient.id,
+      source: 'database'
+    };
+  }
+  
+  // Fallback to ENV configuration
+  console.log('📋 Using ENV fallback for client config');
+  
   const activeClient = clientId || process.env.ACTIVE_CLIENT || 'default';
 
   if (activeClient === 'default') {
@@ -17,7 +162,8 @@ function getClientConfig(clientId = null) {
       url: process.env.WP_API_URL,
       username: process.env.WP_API_USERNAME,
       password: process.env.WP_API_PASSWORD,
-      name: 'default'
+      name: 'default',
+      source: 'env'
     };
   }
 
@@ -27,34 +173,42 @@ function getClientConfig(clientId = null) {
     url: process.env[`${clientPrefix}_WP_API_URL`],
     username: process.env[`${clientPrefix}_WP_API_USERNAME`],
     password: process.env[`${clientPrefix}_WP_API_PASSWORD`],
-    name: activeClient
+    name: activeClient,
+    source: 'env'
   };
 }
 
-// Extract domain from URL
-function extractDomain(url) {
-  try {
-    const urlObj = new URL(url);
-    return urlObj.hostname;
-  } catch (e) {
-    return null;
-  }
-}
-
 // Get all available client configurations
-function getAllClientConfigs() {
+async function getAllClientConfigs() {
   const configs = [];
-
-  // Add default config
+  
+  // Try database first
+  const dbClients = await loadClientsFromDB();
+  
+  if (dbClients && dbClients.length > 0) {
+    for (const client of dbClients) {
+      configs.push({
+        id: client.name.toLowerCase().replace(/\s+/g, '-'),
+        name: client.name,
+        domain: extractDomain(client.wordpress_url),
+        status: client.status,
+        source: 'database'
+      });
+    }
+    return configs;
+  }
+  
+  // Fallback to ENV
   if (process.env.WP_API_URL) {
     configs.push({
       id: 'default',
+      name: 'Default',
       domain: extractDomain(process.env.WP_API_URL),
-      config: getClientConfig('default')
+      source: 'env'
     });
   }
 
-  // Check for CLIENT1 through CLIENT20 (reasonable limit)
+  // Check for CLIENT1 through CLIENT20
   for (let i = 1; i <= 20; i++) {
     const clientId = `client${i}`;
     const prefix = `CLIENT${i}`;
@@ -63,8 +217,9 @@ function getAllClientConfigs() {
     if (url) {
       configs.push({
         id: clientId,
+        name: `Client ${i}`,
         domain: extractDomain(url),
-        config: getClientConfig(clientId)
+        source: 'env'
       });
     }
   }
@@ -73,15 +228,15 @@ function getAllClientConfigs() {
 }
 
 // Detect client by domain from URL
-function detectClientByDomain(urlString) {
+async function detectClientByDomain(urlString) {
   const domain = extractDomain(urlString);
   if (!domain) return null;
 
-  const allConfigs = getAllClientConfigs();
+  const allConfigs = await getAllClientConfigs();
 
   // Find matching client by domain
   for (const { id, domain: clientDomain } of allConfigs) {
-    if (clientDomain && clientDomain === domain) {
+    if (clientDomain && clientDomain.includes(domain) || domain.includes(clientDomain)) {
       return id;
     }
   }
@@ -89,15 +244,16 @@ function detectClientByDomain(urlString) {
   return null;
 }
 
-const config = getClientConfig();
-const WP_API_URL = config.url;
-const WP_API_USERNAME = config.username;
-const WP_API_PASSWORD = config.password;
+// Initialize with first available client for validation
+const initConfig = await getClientConfig();
+const WP_API_URL = initConfig.url;
+const WP_API_USERNAME = initConfig.username;
+const WP_API_PASSWORD = initConfig.password;
 
 if (!WP_API_URL || !WP_API_USERNAME || !WP_API_PASSWORD) {
-  console.error('Missing required environment variables for client:', config.name);
-  console.error('Required: WP_API_URL, WP_API_USERNAME, WP_API_PASSWORD');
-  console.error('Or set ACTIVE_CLIENT and CLIENT[N]_* variables');
+  console.error('❌ No WordPress clients configured!');
+  console.error('   Either configure DATABASE_URL for Agency OS connection');
+  console.error('   Or set WP_API_URL, WP_API_USERNAME, WP_API_PASSWORD in ENV');
   process.exit(1);
 }
 
@@ -105,7 +261,7 @@ const baseURL = WP_API_URL.replace(/\/+$/, '');
 const wpApiBase = baseURL.includes('/wp-json') ? baseURL : `${baseURL}/wp-json`;
 const authHeader = 'Basic ' + Buffer.from(`${WP_API_USERNAME}:${WP_API_PASSWORD}`).toString('base64');
 
-console.log(`🚀 Active Client: ${config.name}`);
+console.log(`🚀 Default Client: ${initConfig.name} (${initConfig.source})`);
 
 async function wpRequest(endpoint, options = {}) {
   const url = `${wpApiBase}${endpoint}`;
@@ -131,6 +287,39 @@ async function wpRequest(endpoint, options = {}) {
   }
 
   return data;
+}
+
+// Create wpRequest for specific client
+function createWpRequestForClient(clientConfig) {
+  const baseURL = clientConfig.url.replace(/\/+$/, '');
+  const wpApiBase = baseURL.includes('/wp-json') ? baseURL : `${baseURL}/wp-json`;
+  const authHeader = 'Basic ' + Buffer.from(`${clientConfig.username}:${clientConfig.password}`).toString('base64');
+
+  return async function(endpoint, options = {}) {
+    const url = `${wpApiBase}${endpoint}`;
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
+        ...options.headers
+      }
+    });
+
+    const text = await response.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch (e) {
+      throw new Error(`Invalid JSON from WordPress: ${text.substring(0, 100)}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`WordPress API error (${response.status}): ${JSON.stringify(data)}`);
+    }
+
+    return data;
+  };
 }
 
 const tools = [
@@ -271,7 +460,7 @@ const tools = [
     }
   },
 
-  // MEDIA (5 endpoints - NEW: update & delete!)
+  // MEDIA (5 endpoints)
   {
     name: 'wp_get_media',
     description: 'Get WordPress media files',
@@ -338,7 +527,7 @@ const tools = [
     }
   },
 
-  // COMMENTS (5 endpoints - NEW!)
+  // COMMENTS (5 endpoints)
   {
     name: 'wp_get_comments',
     description: 'Get WordPress comments',
@@ -405,7 +594,7 @@ const tools = [
     }
   },
 
-  // USERS (3 endpoints - NEW!)
+  // USERS (3 endpoints)
   {
     name: 'wp_get_users',
     description: 'Get WordPress users',
@@ -482,7 +671,7 @@ const tools = [
     }
   },
 
-  // TAXONOMY (6 endpoints - NEW: create, update, delete!)
+  // TAXONOMY (6 endpoints)
   {
     name: 'wp_get_categories',
     description: 'Get WordPress categories',
@@ -557,7 +746,7 @@ const tools = [
     }
   },
 
-  // SITE INFO (4 endpoints - NEW!)
+  // SITE INFO (3 endpoints)
   {
     name: 'wp_get_site_info',
     description: 'Get WordPress site information and settings including special page IDs',
@@ -581,43 +770,31 @@ const tools = [
       type: 'object',
       properties: {}
     }
+  },
+
+  // CLIENT MANAGEMENT (new!)
+  {
+    name: 'wp_list_clients',
+    description: 'List all available WordPress clients from database',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
+    name: 'wp_refresh_clients',
+    description: 'Force refresh the client cache from database',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
   }
 ];
 
 // Universal search function - finds ANY content type in WordPress
 async function findContent(searchParams, clientConfig) {
   const { slug, url, search, id } = searchParams;
-
-  // Build WordPress API base URL for this client
-  const baseURL = clientConfig.url.replace(/\/+$/, '');
-  const wpApiBase = baseURL.includes('/wp-json') ? baseURL : `${baseURL}/wp-json`;
-  const authHeader = 'Basic ' + Buffer.from(`${clientConfig.username}:${clientConfig.password}`).toString('base64');
-
-  async function wpRequestForClient(endpoint, options = {}) {
-    const fullUrl = `${wpApiBase}${endpoint}`;
-    const response = await fetch(fullUrl, {
-      ...options,
-      headers: {
-        'Authorization': authHeader,
-        'Content-Type': 'application/json',
-        ...options.headers
-      }
-    });
-
-    const text = await response.text();
-    let data;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch (e) {
-      throw new Error(`Invalid JSON from WordPress: ${text.substring(0, 100)}`);
-    }
-
-    if (!response.ok) {
-      throw new Error(`WordPress API error (${response.status}): ${JSON.stringify(data)}`);
-    }
-
-    return data;
-  }
+  const wpRequestForClient = createWpRequestForClient(clientConfig);
 
   // If searching by ID, try direct lookup
   if (id) {
@@ -674,7 +851,6 @@ async function findContent(searchParams, clientConfig) {
   if (searchSlug && !search) {
     try {
       const settings = await wpRequestForClient('/wp/v2/settings');
-      const specialPages = {};
 
       // Check homepage
       if (settings.show_on_front === 'page' && settings.page_on_front) {
@@ -806,8 +982,34 @@ async function findContent(searchParams, clientConfig) {
   };
 }
 
-async function executeTool(name, args) {
+async function executeTool(name, args, clientConfig = null) {
+  // Get client-specific wpRequest if provided
+  const wpReq = clientConfig ? createWpRequestForClient(clientConfig) : wpRequest;
+  const currentAuthHeader = clientConfig 
+    ? 'Basic ' + Buffer.from(`${clientConfig.username}:${clientConfig.password}`).toString('base64')
+    : authHeader;
+
   switch (name) {
+    // CLIENT MANAGEMENT
+    case 'wp_list_clients': {
+      const clients = await getAllClientConfigs();
+      return { 
+        clients,
+        count: clients.length,
+        source: clients[0]?.source || 'none'
+      };
+    }
+
+    case 'wp_refresh_clients': {
+      invalidateClientCache();
+      const clients = await loadClientsFromDB();
+      return { 
+        success: true,
+        count: clients?.length || 0,
+        message: clients ? 'Cache refreshed from database' : 'Using ENV fallback'
+      };
+    }
+
     // POSTS
     case 'wp_get_posts': {
       const params = new URLSearchParams({
@@ -819,12 +1021,12 @@ async function executeTool(name, args) {
       if (args.author) params.append('author', String(args.author));
       if (args.categories) params.append('categories', args.categories);
       
-      const posts = await wpRequest(`/wp/v2/posts?${params}`);
+      const posts = await wpReq(`/wp/v2/posts?${params}`);
       return { posts: posts.map(p => ({ id: p.id, title: p.title.rendered, excerpt: p.excerpt.rendered, date: p.date, link: p.link })) };
     }
 
     case 'wp_get_post': {
-      const post = await wpRequest(`/wp/v2/posts/${args.id}`);
+      const post = await wpReq(`/wp/v2/posts/${args.id}`);
       return { 
         id: post.id, 
         title: post.title.rendered, 
@@ -837,7 +1039,7 @@ async function executeTool(name, args) {
     }
 
     case 'wp_create_post': {
-      const post = await wpRequest('/wp/v2/posts', {
+      const post = await wpReq('/wp/v2/posts', {
         method: 'POST',
         body: JSON.stringify({
           title: args.title,
@@ -858,7 +1060,7 @@ async function executeTool(name, args) {
       if (args.status) updates.status = args.status;
       if (args.excerpt) updates.excerpt = args.excerpt;
 
-      const post = await wpRequest(`/wp/v2/posts/${args.id}`, {
+      const post = await wpReq(`/wp/v2/posts/${args.id}`, {
         method: 'POST',
         body: JSON.stringify(updates)
       });
@@ -866,7 +1068,7 @@ async function executeTool(name, args) {
     }
 
     case 'wp_delete_post': {
-      await wpRequest(`/wp/v2/posts/${args.id}?force=${args.force || false}`, {
+      await wpReq(`/wp/v2/posts/${args.id}?force=${args.force || false}`, {
         method: 'DELETE'
       });
       return { deleted: true, id: args.id };
@@ -881,12 +1083,12 @@ async function executeTool(name, args) {
       });
       if (args.search) params.append('search', args.search);
       
-      const pages = await wpRequest(`/wp/v2/pages?${params}`);
+      const pages = await wpReq(`/wp/v2/pages?${params}`);
       return { pages: pages.map(p => ({ id: p.id, title: p.title.rendered, link: p.link })) };
     }
 
     case 'wp_get_page': {
-      const page = await wpRequest(`/wp/v2/pages/${args.id}`);
+      const page = await wpReq(`/wp/v2/pages/${args.id}`);
       return {
         id: page.id,
         title: page.title.rendered,
@@ -898,7 +1100,7 @@ async function executeTool(name, args) {
     }
 
     case 'wp_create_page': {
-      const page = await wpRequest('/wp/v2/pages', {
+      const page = await wpReq('/wp/v2/pages', {
         method: 'POST',
         body: JSON.stringify({
           title: args.title,
@@ -916,7 +1118,7 @@ async function executeTool(name, args) {
       if (args.content) updates.content = args.content;
       if (args.status) updates.status = args.status;
 
-      const page = await wpRequest(`/wp/v2/pages/${args.id}`, {
+      const page = await wpReq(`/wp/v2/pages/${args.id}`, {
         method: 'POST',
         body: JSON.stringify(updates)
       });
@@ -924,7 +1126,7 @@ async function executeTool(name, args) {
     }
 
     case 'wp_delete_page': {
-      await wpRequest(`/wp/v2/pages/${args.id}?force=${args.force || false}`, {
+      await wpReq(`/wp/v2/pages/${args.id}?force=${args.force || false}`, {
         method: 'DELETE'
       });
       return { deleted: true, id: args.id };
@@ -938,7 +1140,7 @@ async function executeTool(name, args) {
       });
       if (args.media_type) params.append('media_type', args.media_type);
       
-      const media = await wpRequest(`/wp/v2/media?${params}`);
+      const media = await wpReq(`/wp/v2/media?${params}`);
       return { 
         media: media.map(m => ({ 
           id: m.id, 
@@ -951,7 +1153,7 @@ async function executeTool(name, args) {
     }
 
     case 'wp_get_media_item': {
-      const media = await wpRequest(`/wp/v2/media/${args.id}`);
+      const media = await wpReq(`/wp/v2/media/${args.id}`);
       return {
         id: media.id,
         title: media.title.rendered,
@@ -962,71 +1164,70 @@ async function executeTool(name, args) {
       };
     }
 
-      case 'wp_upload_media': {
-        const buffer = Buffer.from(args.base64_content, 'base64');
-        const media = await wpRequest('/wp/v2/media', {
+    case 'wp_upload_media': {
+      const buffer = Buffer.from(args.base64_content, 'base64');
+      const media = await wpReq('/wp/v2/media', {
+        method: 'POST',
+        headers: {
+          'Content-Disposition': `attachment; filename="${args.filename}"`,
+          'Content-Type': 'application/octet-stream',
+          'Authorization': currentAuthHeader
+        },
+        body: buffer
+      });
+      
+      if (args.title || args.alt_text) {
+        const updates = {};
+        if (args.title) updates.title = args.title;
+        if (args.alt_text) updates.alt_text = args.alt_text;
+        
+        await wpReq(`/wp/v2/media/${media.id}`, {
           method: 'POST',
-          headers: {
-            'Content-Disposition': `attachment; filename="${args.filename}"`,
-            'Content-Type': 'application/octet-stream',
-            'Authorization': authHeader
-          },
-          body: buffer
+          body: JSON.stringify(updates)
         });
-        
-        if (args.title || args.alt_text) {
-          const updates = {};
-          if (args.title) updates.title = args.title;
-          if (args.alt_text) updates.alt_text = args.alt_text;
-          
-          await wpRequest(`/wp/v2/media/${media.id}`, {
-            method: 'POST',
-            body: JSON.stringify(updates)
-          });
-        }
-        
-        return {
-          id: media.id,
-          url: media.source_url,
-          slug: media.slug,
-          guid: media.guid?.rendered,
-          title: media.title?.rendered,
-          alt_text: media.alt_text || "",
-        };
       }
-  
-      case 'wp_update_media': {
-    const updates = {};
-  
-    if (args.title) updates.title = { raw: args.title };
-    if (args.alt_text !== undefined) updates.alt_text = args.alt_text;
-    if (args.caption) updates.caption = { raw: args.caption };
-    if (args.description) updates.description = { raw: args.description };
-    if (args.post !== undefined) updates.post = args.post;
-  
-    if (Object.keys(updates).length === 0) {
-      throw new Error('No fields to update. Provide at least one valid field.');
+      
+      return {
+        id: media.id,
+        url: media.source_url,
+        slug: media.slug,
+        guid: media.guid?.rendered,
+        title: media.title?.rendered,
+        alt_text: media.alt_text || "",
+      };
     }
-  
-    const media = await wpRequest(`/wp/v2/media/${args.id}?context=edit`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json; charset=UTF-8',
-        'Authorization': authHeader
-      },
-      body: JSON.stringify(updates)
-    });
-  
-    return { 
-      id: media.id, 
-      url: media.source_url,
-      title: media.title?.rendered || media.title?.raw || media.title,
-      alt_text: media.alt_text 
-    };
-  }
+
+    case 'wp_update_media': {
+      const updates = {};
+      if (args.title) updates.title = { raw: args.title };
+      if (args.alt_text !== undefined) updates.alt_text = args.alt_text;
+      if (args.caption) updates.caption = { raw: args.caption };
+      if (args.description) updates.description = { raw: args.description };
+      if (args.post !== undefined) updates.post = args.post;
+
+      if (Object.keys(updates).length === 0) {
+        throw new Error('No fields to update. Provide at least one valid field.');
+      }
+
+      const media = await wpReq(`/wp/v2/media/${args.id}?context=edit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=UTF-8',
+          'Authorization': currentAuthHeader
+        },
+        body: JSON.stringify(updates)
+      });
+
+      return { 
+        id: media.id, 
+        url: media.source_url,
+        title: media.title?.rendered || media.title?.raw || media.title,
+        alt_text: media.alt_text 
+      };
+    }
 
     case 'wp_delete_media': {
-      await wpRequest(`/wp/v2/media/${args.id}?force=${args.force || false}`, {
+      await wpReq(`/wp/v2/media/${args.id}?force=${args.force || false}`, {
         method: 'DELETE'
       });
       return { deleted: true, id: args.id };
@@ -1042,7 +1243,7 @@ async function executeTool(name, args) {
       if (args.post) params.append('post', String(args.post));
       if (args.search) params.append('search', args.search);
       
-      const comments = await wpRequest(`/wp/v2/comments?${params}`);
+      const comments = await wpReq(`/wp/v2/comments?${params}`);
       return { 
         comments: comments.map(c => ({ 
           id: c.id, 
@@ -1056,7 +1257,7 @@ async function executeTool(name, args) {
     }
 
     case 'wp_get_comment': {
-      const comment = await wpRequest(`/wp/v2/comments/${args.id}`);
+      const comment = await wpReq(`/wp/v2/comments/${args.id}`);
       return {
         id: comment.id,
         post: comment.post,
@@ -1077,7 +1278,7 @@ async function executeTool(name, args) {
       if (args.author_email) commentData.author_email = args.author_email;
       if (args.parent) commentData.parent = args.parent;
 
-      const comment = await wpRequest('/wp/v2/comments', {
+      const comment = await wpReq('/wp/v2/comments', {
         method: 'POST',
         body: JSON.stringify(commentData)
       });
@@ -1089,7 +1290,7 @@ async function executeTool(name, args) {
       if (args.content) updates.content = args.content;
       if (args.status) updates.status = args.status;
 
-      const comment = await wpRequest(`/wp/v2/comments/${args.id}`, {
+      const comment = await wpReq(`/wp/v2/comments/${args.id}`, {
         method: 'POST',
         body: JSON.stringify(updates)
       });
@@ -1097,7 +1298,7 @@ async function executeTool(name, args) {
     }
 
     case 'wp_delete_comment': {
-      await wpRequest(`/wp/v2/comments/${args.id}?force=${args.force || false}`, {
+      await wpReq(`/wp/v2/comments/${args.id}?force=${args.force || false}`, {
         method: 'DELETE'
       });
       return { deleted: true, id: args.id };
@@ -1112,7 +1313,7 @@ async function executeTool(name, args) {
       if (args.search) params.append('search', args.search);
       if (args.roles) params.append('roles', args.roles);
       
-      const users = await wpRequest(`/wp/v2/users?${params}`);
+      const users = await wpReq(`/wp/v2/users?${params}`);
       return { 
         users: users.map(u => ({ 
           id: u.id, 
@@ -1126,7 +1327,7 @@ async function executeTool(name, args) {
     }
 
     case 'wp_get_user': {
-      const user = await wpRequest(`/wp/v2/users/${args.id}`);
+      const user = await wpReq(`/wp/v2/users/${args.id}`);
       return {
         id: user.id,
         name: user.name,
@@ -1139,7 +1340,7 @@ async function executeTool(name, args) {
     }
 
     case 'wp_get_current_user': {
-      const users = await wpRequest('/wp/v2/users/me');
+      const users = await wpReq('/wp/v2/users/me');
       return {
         id: users.id,
         name: users.name,
@@ -1157,93 +1358,52 @@ async function executeTool(name, args) {
         status: args.status || 'publish'
       });
       
-      const posts = await wpRequest(`/wp/v2/${args.post_type}?${params}`);
+      const posts = await wpReq(`/wp/v2/${args.post_type}?${params}`);
       return { posts: posts.map(p => ({ id: p.id, title: p.title?.rendered || 'Untitled', link: p.link })) };
+    }
+
+    case 'wp_get_custom_post': {
+      const post = await wpReq(`/wp/v2/${args.post_type}/${args.id}`);
+      return {
+        id: post.id,
+        title: post.title?.rendered || 'Untitled',
+        content: post.content?.rendered,
+        link: post.link,
+        status: post.status
+      };
     }
 
     case 'wp_create_custom_post': {
       const postData = {
         title: args.title,
         content: args.content,
-        status: args.status || 'draft',
-        fields: {}
+        status: args.status || 'draft'
       };
       
-      if (args.excerpt) postData.excerpt = args.excerpt;
-      if (args.slug) postData.slug = args.slug;
-      
-      // Separate podcast_schema from other meta fields
-      let podcastSchema = null;
-      const acfFields = {};
-      
       if (args.meta) {
-        // Extract podcast_schema separately
-        if (args.meta.podcast_schema) {
-          podcastSchema = args.meta.podcast_schema;
-          console.log('📊 Podcast schema detected, will save separately');
-        }
-        
-        // Keep all other meta fields for ACF
-        Object.keys(args.meta).forEach(key => {
-          if (key !== 'podcast_schema') {
-            acfFields[key] = args.meta[key];
-          }
-        });
-        
-        // Set ACF fields if any exist
-        if (Object.keys(acfFields).length > 0) {
-          postData.acf = acfFields;
-        }
+        postData.acf = args.meta;
       }
       
-      // Create the post
-      const post = await wpRequest(`/wp/v2/${args.post_type}`, {
+      const post = await wpReq(`/wp/v2/${args.post_type}`, {
         method: 'POST',
         body: JSON.stringify(postData)
       });
       
-      console.log(`✅ Post created: ID ${post.id}`);
-      
-      // Save podcast schema as custom meta field if present
-      if (podcastSchema && post.id) {
-        try {
-          // Validate that it's valid JSON
-          if (typeof podcastSchema === 'string') {
-            JSON.parse(podcastSchema); // Just to validate
-          }
-          
-          // Update post with meta field
-          const metaUpdate = await wpRequest(`/wp/v2/${args.post_type}/${post.id}`, {
-            method: 'POST',
-            body: JSON.stringify({
-              meta: {
-                _podcast_schema_json: podcastSchema
-              }
-            })
-          });
-          
-          console.log('📊 Podcast schema saved successfully');
-        } catch (error) {
-          console.error('❌ Error saving podcast schema:', error.message);
-          // Don't fail the whole operation if schema save fails
-        }
-      }
-      
       return { 
         id: post.id, 
         link: post.link,
-        schema_saved: !!podcastSchema
+        status: post.status
       };
     }
 
     // TAXONOMY
     case 'wp_get_categories': {
-      const categories = await wpRequest(`/wp/v2/categories?per_page=${args.per_page || 100}`);
+      const categories = await wpReq(`/wp/v2/categories?per_page=${args.per_page || 100}`);
       return { categories: categories.map(c => ({ id: c.id, name: c.name, count: c.count })) };
     }
 
     case 'wp_get_tags': {
-      const tags = await wpRequest(`/wp/v2/tags?per_page=${args.per_page || 100}`);
+      const tags = await wpReq(`/wp/v2/tags?per_page=${args.per_page || 100}`);
       return { tags: tags.map(t => ({ id: t.id, name: t.name, count: t.count })) };
     }
 
@@ -1253,7 +1413,7 @@ async function executeTool(name, args) {
       if (args.parent) categoryData.parent = args.parent;
       if (args.slug) categoryData.slug = args.slug;
 
-      const category = await wpRequest('/wp/v2/categories', {
+      const category = await wpReq('/wp/v2/categories', {
         method: 'POST',
         body: JSON.stringify(categoryData)
       });
@@ -1265,7 +1425,7 @@ async function executeTool(name, args) {
       if (args.description) tagData.description = args.description;
       if (args.slug) tagData.slug = args.slug;
 
-      const tag = await wpRequest('/wp/v2/tags', {
+      const tag = await wpReq('/wp/v2/tags', {
         method: 'POST',
         body: JSON.stringify(tagData)
       });
@@ -1278,7 +1438,7 @@ async function executeTool(name, args) {
       if (args.description !== undefined) updates.description = args.description;
       if (args.parent !== undefined) updates.parent = args.parent;
 
-      const category = await wpRequest(`/wp/v2/categories/${args.id}`, {
+      const category = await wpReq(`/wp/v2/categories/${args.id}`, {
         method: 'POST',
         body: JSON.stringify(updates)
       });
@@ -1286,7 +1446,7 @@ async function executeTool(name, args) {
     }
 
     case 'wp_delete_category': {
-      await wpRequest(`/wp/v2/categories/${args.id}?force=${args.force || false}`, {
+      await wpReq(`/wp/v2/categories/${args.id}?force=${args.force || false}`, {
         method: 'DELETE'
       });
       return { deleted: true, id: args.id };
@@ -1294,7 +1454,7 @@ async function executeTool(name, args) {
 
     // SITE INFO
     case 'wp_get_site_info': {
-      const settings = await wpRequest('/wp/v2/settings');
+      const settings = await wpReq('/wp/v2/settings');
       return {
         title: settings.title,
         description: settings.description,
@@ -1303,10 +1463,9 @@ async function executeTool(name, args) {
         language: settings.language,
         date_format: settings.date_format,
         time_format: settings.time_format,
-        // Special page settings
-        show_on_front: settings.show_on_front, // 'posts' or 'page'
-        page_on_front: settings.page_on_front || 0, // Homepage page ID (0 if show_on_front is 'posts')
-        page_for_posts: settings.page_for_posts || 0, // Blog listing page ID
+        show_on_front: settings.show_on_front,
+        page_on_front: settings.page_on_front || 0,
+        page_for_posts: settings.page_for_posts || 0,
         posts_per_page: settings.posts_per_page || 10,
         default_category: settings.default_category || 1,
         default_post_format: settings.default_post_format || '0'
@@ -1314,13 +1473,12 @@ async function executeTool(name, args) {
     }
 
     case 'wp_get_special_pages': {
-      const settings = await wpRequest('/wp/v2/settings');
+      const settings = await wpReq('/wp/v2/settings');
       const specialPages = {};
 
-      // Get homepage details if set to a static page
       if (settings.show_on_front === 'page' && settings.page_on_front) {
         try {
-          const homepage = await wpRequest(`/wp/v2/pages/${settings.page_on_front}`);
+          const homepage = await wpReq(`/wp/v2/pages/${settings.page_on_front}`);
           specialPages.homepage = {
             id: homepage.id,
             title: homepage.title.rendered,
@@ -1342,10 +1500,9 @@ async function executeTool(name, args) {
         };
       }
 
-      // Get blog listing page details if set
       if (settings.page_for_posts) {
         try {
-          const blogPage = await wpRequest(`/wp/v2/pages/${settings.page_for_posts}`);
+          const blogPage = await wpReq(`/wp/v2/pages/${settings.page_for_posts}`);
           specialPages.blog_page = {
             id: blogPage.id,
             title: blogPage.title.rendered,
@@ -1362,10 +1519,9 @@ async function executeTool(name, args) {
         }
       }
 
-      // Get privacy policy page if set
       if (settings.wp_page_for_privacy_policy) {
         try {
-          const privacyPage = await wpRequest(`/wp/v2/pages/${settings.wp_page_for_privacy_policy}`);
+          const privacyPage = await wpReq(`/wp/v2/pages/${settings.wp_page_for_privacy_policy}`);
           specialPages.privacy_policy = {
             id: privacyPage.id,
             title: privacyPage.title.rendered,
@@ -1382,7 +1538,6 @@ async function executeTool(name, args) {
         }
       }
 
-      // Add reading settings context
       specialPages._settings = {
         show_on_front: settings.show_on_front,
         posts_per_page: settings.posts_per_page,
@@ -1393,7 +1548,7 @@ async function executeTool(name, args) {
     }
 
     case 'wp_get_post_types': {
-      const types = await wpRequest('/wp/v2/types');
+      const types = await wpReq('/wp/v2/types');
       return { 
         post_types: Object.entries(types).map(([key, type]) => ({
           slug: key,
@@ -1412,20 +1567,58 @@ async function executeTool(name, args) {
 
 // HTTP Server
 const server = http.createServer(async (req, res) => {
-  // Handle GET /api/find endpoint
-  if (req.method === 'GET' && req.url.startsWith('/api/find')) {
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    return res.end();
+  }
+
+  // Health check
+  if (req.method === 'GET' && req.url === '/health') {
+    const clients = await getAllClientConfigs();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      status: 'healthy',
+      version: '3.0.0',
+      clients: clients.length,
+      source: clients[0]?.source || 'none',
+      database: pgClient ? 'connected' : 'disconnected'
+    }));
+  }
+
+  // List clients endpoint
+  if (req.method === 'GET' && req.url === '/api/clients') {
     try {
-      // Check API Key
       const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
       if (API_KEY && apiKey !== API_KEY) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Unauthorized: Invalid API Key' }));
       }
 
-      // Parse URL and query parameters
+      const clients = await getAllClientConfigs();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ clients, count: clients.length }));
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: error.message }));
+    }
+  }
+
+  // Handle GET /api/find endpoint
+  if (req.method === 'GET' && req.url.startsWith('/api/find')) {
+    try {
+      const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+      if (API_KEY && apiKey !== API_KEY) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Unauthorized: Invalid API Key' }));
+      }
+
       const urlObj = new URL(req.url, `http://${req.headers.host}`);
       const params = Object.fromEntries(urlObj.searchParams);
-
       const { slug, url, search, id, client } = params;
 
       if (!slug && !url && !search && !id) {
@@ -1435,17 +1628,15 @@ const server = http.createServer(async (req, res) => {
         }));
       }
 
-      // Auto-detect client by domain if URL is provided and no client specified
       let detectedClient = client;
       if (!detectedClient && url) {
-        detectedClient = detectClientByDomain(url);
+        detectedClient = await detectClientByDomain(url);
         if (detectedClient) {
           console.log(`🔍 Auto-detected client from URL domain: ${detectedClient}`);
         }
       }
 
-      // Get client configuration
-      const clientConfig = getClientConfig(detectedClient);
+      const clientConfig = await getClientConfig(detectedClient);
 
       if (!clientConfig.url || !clientConfig.username || !clientConfig.password) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1454,14 +1645,13 @@ const server = http.createServer(async (req, res) => {
         }));
       }
 
-      // Perform the universal search
       const result = await findContent({ id, slug, url, search }, clientConfig);
 
-      // Add client info to response
       const responseData = {
         ...result,
         _meta: {
-          client: detectedClient || 'default',
+          client: clientConfig.name,
+          source: clientConfig.source,
           autoDetected: !client && !!detectedClient
         }
       };
@@ -1478,23 +1668,20 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Handle GET /api/site-data endpoint (UNIFIED - Recommended!)
+  // Handle GET /api/site-data endpoint
   if (req.method === 'GET' && req.url.startsWith('/api/site-data')) {
     try {
-      // Check API Key
       const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
       if (API_KEY && apiKey !== API_KEY) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Unauthorized: Invalid API Key' }));
       }
 
-      // Parse URL and query parameters for client selection
       const urlObj = new URL(req.url, `http://${req.headers.host}`);
       const params = Object.fromEntries(urlObj.searchParams);
       const { client } = params;
 
-      // Get client configuration
-      const clientConfig = getClientConfig(client);
+      const clientConfig = await getClientConfig(client);
 
       if (!clientConfig.url || !clientConfig.username || !clientConfig.password) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1503,18 +1690,17 @@ const server = http.createServer(async (req, res) => {
         }));
       }
 
-      // Call both endpoints in parallel for maximum efficiency
       const [siteInfo, specialPages] = await Promise.all([
-        executeTool('wp_get_site_info', {}),
-        executeTool('wp_get_special_pages', {})
+        executeTool('wp_get_site_info', {}, clientConfig),
+        executeTool('wp_get_special_pages', {}, clientConfig)
       ]);
 
-      // Unified response with all site data
       const responseData = {
         site: siteInfo,
         pages: specialPages,
         _meta: {
-          client: client || 'default',
+          client: clientConfig.name,
+          source: clientConfig.source,
           endpoint: '/api/site-data',
           timestamp: new Date().toISOString()
         }
@@ -1532,108 +1718,19 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Handle GET /api/special-pages endpoint
-  if (req.method === 'GET' && req.url.startsWith('/api/special-pages')) {
-    try {
-      // Check API Key
-      const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
-      if (API_KEY && apiKey !== API_KEY) {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Unauthorized: Invalid API Key' }));
-      }
-
-      // Parse URL and query parameters for client selection
-      const urlObj = new URL(req.url, `http://${req.headers.host}`);
-      const params = Object.fromEntries(urlObj.searchParams);
-      const { client } = params;
-
-      // Get client configuration
-      const clientConfig = getClientConfig(client);
-
-      if (!clientConfig.url || !clientConfig.username || !clientConfig.password) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({
-          error: `Invalid client configuration for: ${client || 'default'}`
-        }));
-      }
-
-      // Call wp_get_special_pages
-      const result = await executeTool('wp_get_special_pages', {});
-
-      // Add client info to response
-      const responseData = {
-        ...result,
-        _meta: {
-          client: client || 'default',
-          endpoint: '/api/special-pages'
-        }
-      };
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify(responseData, null, 2));
-
-    } catch (error) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({
-        error: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      }));
-    }
-  }
-
-  // Handle GET /api/site-info endpoint
-  if (req.method === 'GET' && req.url.startsWith('/api/site-info')) {
-    try {
-      // Check API Key
-      const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
-      if (API_KEY && apiKey !== API_KEY) {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Unauthorized: Invalid API Key' }));
-      }
-
-      // Parse URL and query parameters for client selection
-      const urlObj = new URL(req.url, `http://${req.headers.host}`);
-      const params = Object.fromEntries(urlObj.searchParams);
-      const { client } = params;
-
-      // Get client configuration
-      const clientConfig = getClientConfig(client);
-
-      if (!clientConfig.url || !clientConfig.username || !clientConfig.password) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({
-          error: `Invalid client configuration for: ${client || 'default'}`
-        }));
-      }
-
-      // Call wp_get_site_info
-      const result = await executeTool('wp_get_site_info', {});
-
-      // Add client info to response
-      const responseData = {
-        ...result,
-        _meta: {
-          client: client || 'default',
-          endpoint: '/api/site-info'
-        }
-      };
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify(responseData, null, 2));
-
-    } catch (error) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({
-        error: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      }));
-    }
-  }
-
-  // Handle POST /mcp endpoint (existing MCP protocol)
+  // Handle POST /mcp endpoint (MCP protocol)
   if (req.method !== 'POST' || req.url !== '/mcp') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ error: 'Not found. Use POST /mcp, GET /api/find, GET /api/site-data (recommended), GET /api/special-pages, or GET /api/site-info' }));
+    return res.end(JSON.stringify({ 
+      error: 'Not found',
+      endpoints: [
+        'GET /health',
+        'GET /api/clients',
+        'GET /api/find?slug=...&client=...',
+        'GET /api/site-data?client=...',
+        'POST /mcp'
+      ]
+    }));
   }
 
   try {
@@ -1653,8 +1750,8 @@ const server = http.createServer(async (req, res) => {
           capabilities: { tools: {} },
           serverInfo: {
             name: 'WordPress MCP Server',
-            version: '2.2.0',
-            description: '36 WordPress REST API endpoints + HTTP API with Special Pages - Posts, Pages, Media, Comments, Users, Taxonomy, Site Info'
+            version: '3.0.0',
+            description: '38 WordPress endpoints + PostgreSQL client management (Agency OS integration)'
           }
         }
       }));
@@ -1672,30 +1769,33 @@ const server = http.createServer(async (req, res) => {
     if (method === 'tools/call') {
       const { name, arguments: args } = params;
     
-      // 🪵 DEBUG - נראה מה n8n שולח
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('🪵 TOOL CALL:', name);
-      console.log('📦 RAW PARAMS:', JSON.stringify(params, null, 2));
       console.log('📦 ARGS:', JSON.stringify(args, null, 2));
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
-      // 🧩 Flatten nested arguments (אם n8n שלח args.arguments)
+      // Handle client parameter for multi-site
+      let clientConfig = null;
+      if (args && args.client) {
+        clientConfig = await getClientConfig(args.client);
+        delete args.client; // Remove from args after extracting
+      }
+
+      // Flatten nested arguments
       if (args && args.arguments && typeof args.arguments === 'object') {
         Object.assign(args, args.arguments);
         delete args.arguments;
       }
     
-      // 🛡️ Normalize ID fields
+      // Normalize ID fields
       if (args && typeof args === 'object') {
         if (args.id && !args.ID) args.ID = String(args.id);
         if (args.ID && typeof args.ID !== 'string') args.ID = String(args.ID);
-        
-        // 🔧 Normalize post_type variations
         if (args.postType && !args.post_type) args.post_type = args.postType;
         if (args.type && !args.post_type) args.post_type = args.type;
       }
     
-      const result = await executeTool(name, args || {});
+      const result = await executeTool(name, args || {}, clientConfig);
       
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
@@ -1723,14 +1823,16 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 WordPress MCP Server v2.1.0 listening on :${PORT}`);
+  console.log(`🚀 WordPress MCP Server v3.0.0 listening on :${PORT}`);
   console.log(`📡 MCP Protocol: POST /mcp`);
   console.log(`🔍 HTTP API: GET /api/find?slug=...&client=...`);
+  console.log(`📋 Clients: GET /api/clients`);
   console.log(`🔐 API Key: ${API_KEY ? 'Enabled ✅' : 'Disabled ⚠️'}`);
-  console.log(`🌐 Default site: ${wpApiBase}`);
+  console.log(`🗄️  Database: ${DATABASE_URL ? 'Configured' : 'Not configured (ENV fallback)'}`);
   console.log(`🛠️  Available MCP tools: ${tools.length}`);
 });
 
 process.on('SIGTERM', () => {
+  if (pgClient) pgClient.end();
   server.close(() => process.exit(0));
 });
