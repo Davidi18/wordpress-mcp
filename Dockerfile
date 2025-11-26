@@ -11,4 +11,4 @@ COPY . .
 EXPOSE 9090
 ENV NODE_ENV=production
 
-CMD ["sh", "entrypoint.sh"]
+CMD ["node", "wordpress-mcp-server.js"]
