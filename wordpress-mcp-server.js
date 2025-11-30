@@ -65,6 +65,7 @@ async function loadClientsFromDB() {
         wordpress_url,
         wordpress_username,
         wordpress_app_password,
+        wordpress_client_id,
         status
       FROM clients 
       WHERE wordpress_url IS NOT NULL 
@@ -114,8 +115,8 @@ async function getClientConfig(clientId = null) {
   if (dbClients && dbClients.length > 0) {
     // If specific client requested
     if (clientId) {
-      // Try to find by name (case-insensitive)
       const client = dbClients.find(c => 
+        c.wordpress_client_id === clientId ||
         c.name.toLowerCase() === clientId.toLowerCase() ||
         extractDomain(c.wordpress_url) === extractDomain(clientId)
       );
@@ -188,12 +189,13 @@ async function getAllClientConfigs() {
   if (dbClients && dbClients.length > 0) {
     for (const client of dbClients) {
       configs.push({
-        id: client.name.toLowerCase().replace(/\s+/g, '-'),
+        id: client.wordpress_client_id || client.name.toLowerCase().replace(/\s+/g, '-'),
         name: client.name,
         domain: extractDomain(client.wordpress_url),
         status: client.status,
         source: 'database'
       });
+    }
     }
     return configs;
   }
