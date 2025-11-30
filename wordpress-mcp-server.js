@@ -1381,8 +1381,24 @@ async function executeTool(name, args, clientConfig = null) {
         status: args.status || 'draft'
       };
       
+      // Meta fields (custom fields)
       if (args.meta) {
-        postData.acf = args.meta;
+        postData.meta = args.meta;
+      }
+      
+      // Slug/permalink
+      if (args.slug) {
+        postData.slug = args.slug;
+      }
+      
+      // Excerpt
+      if (args.excerpt) {
+        postData.excerpt = args.excerpt;
+      }
+      
+      // Featured image
+      if (args.featured_media) {
+        postData.featured_media = args.featured_media;
       }
       
       const post = await wpReq(`/wp/v2/${args.post_type}`, {
@@ -1393,7 +1409,9 @@ async function executeTool(name, args, clientConfig = null) {
       return { 
         id: post.id, 
         link: post.link,
-        status: post.status
+        status: post.status,
+        slug: post.slug,
+        meta: post.meta
       };
     }
 
