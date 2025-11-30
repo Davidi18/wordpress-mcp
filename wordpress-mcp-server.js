@@ -196,7 +196,6 @@ async function getAllClientConfigs() {
         source: 'database'
       });
     }
-    }
     return configs;
   }
   
