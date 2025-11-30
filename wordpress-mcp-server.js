@@ -662,10 +662,13 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        post_type: { type: 'string', description: 'Custom post type slug', required: true },
-        title: { type: 'string', description: 'Post title', required: true },
-        content: { type: 'string', description: 'Post content', required: true },
+        post_type: { type: 'string', description: 'Custom post type slug' },
+        title: { type: 'string', description: 'Post title' },
+        content: { type: 'string', description: 'Post content' },
         status: { type: 'string', description: 'Post status', default: 'draft' },
+        slug: { type: 'string', description: 'Post slug/permalink' },
+        excerpt: { type: 'string', description: 'Post excerpt' },
+        featured_media: { type: 'number', description: 'Featured image ID' },
         meta: { type: 'object', description: 'Custom meta fields (key-value pairs)' }
       },
       required: ['post_type', 'title', 'content']
