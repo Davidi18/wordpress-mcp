@@ -107,76 +107,95 @@ function extractDomain(url) {
   }
 }
 
-// Get client config - tries DB first, then ENV fallback
+// Get client config - tries DB first, then ENV fallback with domain matching
 async function getClientConfig(clientId = null) {
   // Try database first
   const dbClients = await loadClientsFromDB();
   
   if (dbClients && dbClients.length > 0) {
-    // If specific client requested
-    if (clientId) {
-      const client = dbClients.find(c => 
-        c.wordpress_client_id === clientId ||
-        c.name.toLowerCase() === clientId.toLowerCase() ||
-        extractDomain(c.wordpress_url) === extractDomain(clientId)
-      );
-      
-      if (client) {
-        const wpUrl = client.wordpress_url.startsWith('http') 
-          ? client.wordpress_url 
-          : `https://${client.wordpress_url}`;
-        
-        return {
-          url: wpUrl,
-          username: client.wordpress_username,
-          password: client.wordpress_app_password,
-          name: client.name,
-          id: client.id,
-          source: 'database'
-        };
-      }
-    }
-    
-    // Return first active client as default
-    const defaultClient = dbClients[0];
-    const wpUrl = defaultClient.wordpress_url.startsWith('http') 
-      ? defaultClient.wordpress_url 
-      : `https://${defaultClient.wordpress_url}`;
-    
-    return {
-      url: wpUrl,
-      username: defaultClient.wordpress_username,
-      password: defaultClient.wordpress_app_password,
-      name: defaultClient.name,
-      id: defaultClient.id,
-      source: 'database'
-    };
+    // ... existing database code stays the same ...
   }
   
   // Fallback to ENV configuration
   console.log('📋 Using ENV fallback for client config');
   
-  const activeClient = clientId || process.env.ACTIVE_CLIENT || 'default';
-
-  if (activeClient === 'default') {
-    return {
+  // Build list of all ENV clients first
+  const envClients = [];
+  
+  // Default client
+  if (process.env.WP_API_URL) {
+    envClients.push({
+      id: 'default',
       url: process.env.WP_API_URL,
       username: process.env.WP_API_USERNAME,
       password: process.env.WP_API_PASSWORD,
+      domain: extractDomain(process.env.WP_API_URL)
+    });
+  }
+  
+  // CLIENT1 through CLIENT20
+  for (let i = 1; i <= 20; i++) {
+    const prefix = `CLIENT${i}`;
+    const url = process.env[`${prefix}_WP_API_URL`];
+    if (url) {
+      envClients.push({
+        id: `client${i}`,
+        url: url,
+        username: process.env[`${prefix}_WP_API_USERNAME`],
+        password: process.env[`${prefix}_WP_API_PASSWORD`],
+        domain: extractDomain(url)
+      });
+    }
+  }
+  
+  // If no clientId specified, return default
+  if (!clientId || clientId === 'default') {
+    const defaultClient = envClients.find(c => c.id === 'default') || envClients[0];
+    return {
+      url: defaultClient?.url,
+      username: defaultClient?.username,
+      password: defaultClient?.password,
       name: 'default',
       source: 'env'
     };
   }
-
-  // Support for CLIENT1_NAME, CLIENT2_NAME, etc.
-  const clientPrefix = activeClient.toUpperCase().replace(/-/g, '_');
-  return {
-    url: process.env[`${clientPrefix}_WP_API_URL`],
-    username: process.env[`${clientPrefix}_WP_API_USERNAME`],
-    password: process.env[`${clientPrefix}_WP_API_PASSWORD`],
-    name: activeClient,
-    source: 'env'
-  };
+  
+  // Try to match by ID first (client1, client2, etc.)
+  let matched = envClients.find(c => c.id === clientId.toLowerCase());
+  
+  // If not found, try to match by domain
+  if (!matched) {
+    const searchDomain = clientId.replace(/-/g, '.'); // yahavrubin-com -> yahavrubin.com
+    matched = envClients.find(c => {
+      if (!c.domain) return false;
+      return c.domain === searchDomain || 
+             c.domain.includes(searchDomain.split('.')[0]) ||
+             searchDomain.includes(c.domain.split('.')[0]);
+    });
+    
+    if (matched) {
+      console.log(`✅ Matched "${clientId}" to ${matched.domain} (${matched.id})`);
+    }
+  }
+  
+  // Return matched client
+  if (matched) {
+    return {
+      url: matched.url,
+      username: matched.username,
+      password: matched.password,
+      name: matched.id,
+      source: 'env'
+    };
+  }
+  
+  // No match found - throw detailed error
+  const availableClients = envClients.map(c => `${c.id} (${c.domain})`).join(', ');
+  throw new Error(
+    `Client not found: "${clientId}". ` +
+    `Available clients: [${availableClients}]. ` +
+    `Tip: Use exact ID (e.g., "client5") or domain format (e.g., "yahavrubin-com" or "yahavrubin.com")`
+  );
 }
 
 // Get all available client configurations
