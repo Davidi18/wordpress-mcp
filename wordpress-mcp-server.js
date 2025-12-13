@@ -1073,7 +1073,20 @@ async function executeTool(name, args, clientConfig = null) {
           tags: args.tags
         })
       });
-      return { id: post.id, link: post.link, status: post.status };
+      return {
+        id: post.id,
+        title: post.title.rendered,
+        slug: post.slug,
+        link: post.link,
+        status: post.status,
+        date: post.date,
+        modified: post.modified,
+        excerpt: post.excerpt?.rendered,
+        author: post.author,
+        categories: post.categories,
+        tags: post.tags,
+        featured_media: post.featured_media
+      };
     }
 
     case 'wp_update_post': {
@@ -1087,7 +1100,20 @@ async function executeTool(name, args, clientConfig = null) {
         method: 'POST',
         body: JSON.stringify(updates)
       });
-      return { id: post.id, link: post.link, status: post.status };
+      return {
+        id: post.id,
+        title: post.title.rendered,
+        slug: post.slug,
+        link: post.link,
+        status: post.status,
+        date: post.date,
+        modified: post.modified,
+        excerpt: post.excerpt?.rendered,
+        author: post.author,
+        categories: post.categories,
+        tags: post.tags,
+        featured_media: post.featured_media
+      };
     }
 
     case 'wp_delete_post': {
@@ -1132,7 +1158,19 @@ async function executeTool(name, args, clientConfig = null) {
           parent: args.parent
         })
       });
-      return { id: page.id, link: page.link, status: page.status };
+      return {
+        id: page.id,
+        title: page.title.rendered,
+        slug: page.slug,
+        link: page.link,
+        status: page.status,
+        date: page.date,
+        modified: page.modified,
+        parent: page.parent,
+        author: page.author,
+        featured_media: page.featured_media,
+        menu_order: page.menu_order
+      };
     }
 
     case 'wp_update_page': {
@@ -1145,7 +1183,19 @@ async function executeTool(name, args, clientConfig = null) {
         method: 'POST',
         body: JSON.stringify(updates)
       });
-      return { id: page.id, link: page.link, status: page.status };
+      return {
+        id: page.id,
+        title: page.title.rendered,
+        slug: page.slug,
+        link: page.link,
+        status: page.status,
+        date: page.date,
+        modified: page.modified,
+        parent: page.parent,
+        author: page.author,
+        featured_media: page.featured_media,
+        menu_order: page.menu_order
+      };
     }
 
     case 'wp_delete_page': {
@@ -1837,12 +1887,15 @@ const server = http.createServer(async (req, res) => {
       }
     
       const result = await executeTool(name, args || {}, clientConfig);
-      
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
         jsonrpc: '2.0',
         id,
-        result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+        result: {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          data: result  // Structured data for programmatic access
+        }
       }));
     }
 
