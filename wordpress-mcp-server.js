@@ -1887,12 +1887,15 @@ const server = http.createServer(async (req, res) => {
       }
     
       const result = await executeTool(name, args || {}, clientConfig);
-      
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
         jsonrpc: '2.0',
         id,
-        result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+        result: {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          data: result  // Structured data for programmatic access
+        }
       }));
     }
 
