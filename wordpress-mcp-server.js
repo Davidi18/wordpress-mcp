@@ -1668,12 +1668,40 @@ async function executeTool(name, args, clientConfig = null) {
 
     // FILE OPERATIONS
     case 'wp_create_file': {
+      const { path, content, overwrite = true } = args;
+
+      // Security validation (defense in depth - PHP side also validates)
+      const allowedPrefixes = [
+        'wp-content/mu-plugins/',
+        'wp-content/uploads/'
+      ];
+
+      // Check allowed directory
+      if (!allowedPrefixes.some(prefix => path.startsWith(prefix))) {
+        throw new Error(`Path not allowed. Must start with: ${allowedPrefixes.join(' or ')}`);
+      }
+
+      // Prevent path traversal
+      if (path.includes('..')) {
+        throw new Error('Path traversal (..) not allowed');
+      }
+
+      // Prevent double slashes
+      if (path.includes('//')) {
+        throw new Error('Invalid path format');
+      }
+
+      // Only allow .php files in mu-plugins
+      if (path.startsWith('wp-content/mu-plugins/') && !path.endsWith('.php')) {
+        throw new Error('Only .php files allowed in mu-plugins');
+      }
+
       const result = await wpReq('/agency-os/v1/create-file', {
         method: 'POST',
         body: JSON.stringify({
-          path: args.path,
-          content: args.content,
-          overwrite: args.overwrite !== false // default true
+          path,
+          content,
+          overwrite
         })
       });
       return result;
