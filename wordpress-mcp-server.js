@@ -811,6 +811,21 @@ const tools = [
       type: 'object',
       properties: {}
     }
+  },
+
+  // FILE OPERATIONS
+  {
+    name: 'wp_create_file',
+    description: 'Create a file on the WordPress server (restricted to allowed directories: wp-content/mu-plugins/, wp-content/uploads/)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Relative path from WP root (e.g., "wp-content/mu-plugins/file.php")', required: true },
+        content: { type: 'string', description: 'File content', required: true },
+        overwrite: { type: 'boolean', description: 'Overwrite if file exists', default: true }
+      },
+      required: ['path', 'content']
+    }
   }
 ];
 
@@ -1640,7 +1655,7 @@ async function executeTool(name, args, clientConfig = null) {
 
     case 'wp_get_post_types': {
       const types = await wpReq('/wp/v2/types');
-      return { 
+      return {
         post_types: Object.entries(types).map(([key, type]) => ({
           slug: key,
           name: type.name,
@@ -1649,6 +1664,19 @@ async function executeTool(name, args, clientConfig = null) {
           rest_base: type.rest_base
         }))
       };
+    }
+
+    // FILE OPERATIONS
+    case 'wp_create_file': {
+      const result = await wpReq('/agency-os/v1/create-file', {
+        method: 'POST',
+        body: JSON.stringify({
+          path: args.path,
+          content: args.content,
+          overwrite: args.overwrite !== false // default true
+        })
+      });
+      return result;
     }
 
     default:
