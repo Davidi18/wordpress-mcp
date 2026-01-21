@@ -811,6 +811,39 @@ const tools = [
       type: 'object',
       properties: {}
     }
+  },
+
+  // FILE OPERATIONS
+  {
+    name: 'wp_create_file',
+    description: 'Create a file on the WordPress server (restricted to allowed directories: wp-content/mu-plugins/, wp-content/uploads/)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Relative path from WP root (e.g., "wp-content/mu-plugins/file.php")', required: true },
+        content: { type: 'string', description: 'File content', required: true },
+        overwrite: { type: 'boolean', description: 'Overwrite if file exists', default: true }
+      },
+      required: ['path', 'content']
+    }
+  },
+  {
+    name: 'wp_bootstrap_file_api',
+    description: 'Automatically setup File API: checks if installed, installs Code Snippets if needed, creates bootstrap snippet - fully automatic!',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        force: { type: 'boolean', description: 'Force reinstall even if File API exists', default: false }
+      }
+    }
+  },
+  {
+    name: 'wp_check_file_api',
+    description: 'Check if the File API endpoint is available on a WordPress site',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
   }
 ];
 
@@ -1640,7 +1673,7 @@ async function executeTool(name, args, clientConfig = null) {
 
     case 'wp_get_post_types': {
       const types = await wpReq('/wp/v2/types');
-      return { 
+      return {
         post_types: Object.entries(types).map(([key, type]) => ({
           slug: key,
           name: type.name,
@@ -1649,6 +1682,266 @@ async function executeTool(name, args, clientConfig = null) {
           rest_base: type.rest_base
         }))
       };
+    }
+
+    // FILE OPERATIONS
+    case 'wp_create_file': {
+      const { path, content, overwrite = true } = args;
+
+      // Security validation (defense in depth - PHP side also validates)
+      const allowedPrefixes = [
+        'wp-content/mu-plugins/',
+        'wp-content/uploads/'
+      ];
+
+      // Check allowed directory
+      if (!allowedPrefixes.some(prefix => path.startsWith(prefix))) {
+        throw new Error(`Path not allowed. Must start with: ${allowedPrefixes.join(' or ')}`);
+      }
+
+      // Prevent path traversal
+      if (path.includes('..')) {
+        throw new Error('Path traversal (..) not allowed');
+      }
+
+      // Prevent double slashes
+      if (path.includes('//')) {
+        throw new Error('Invalid path format');
+      }
+
+      // Only allow .php files in mu-plugins
+      if (path.startsWith('wp-content/mu-plugins/') && !path.endsWith('.php')) {
+        throw new Error('Only .php files allowed in mu-plugins');
+      }
+
+      const result = await wpReq('/agency-os/v1/create-file', {
+        method: 'POST',
+        body: JSON.stringify({
+          path,
+          content,
+          overwrite
+        })
+      });
+      return result;
+    }
+
+    case 'wp_check_file_api': {
+      try {
+        // Try to call the endpoint with empty data to see if it exists
+        await wpReq('/agency-os/v1/create-file', {
+          method: 'POST',
+          body: JSON.stringify({ path: '', content: '' })
+        });
+        return { available: true, message: 'File API is installed and working' };
+      } catch (error) {
+        if (error.message.includes('403') || error.message.includes('forbidden')) {
+          return { available: true, message: 'File API is installed (permission error on empty request is expected)' };
+        }
+        if (error.message.includes('404') || error.message.includes('rest_no_route')) {
+          return {
+            available: false,
+            message: 'File API not installed',
+            instructions: [
+              '1. Install "Code Snippets" plugin on the WordPress site',
+              '2. Run wp_bootstrap_file_api tool to auto-install the File API',
+              'OR manually upload agency-os-file-api.php to wp-content/mu-plugins/'
+            ]
+          };
+        }
+        return { available: false, error: error.message };
+      }
+    }
+
+    case 'wp_bootstrap_file_api': {
+      const steps = [];
+      const force = args.force || false;
+
+      // Step 1: Check if File API already exists
+      if (!force) {
+        try {
+          await wpReq('/agency-os/v1/create-file', {
+            method: 'POST',
+            body: JSON.stringify({ path: '', content: '' })
+          });
+          return { success: true, message: 'File API already installed!', steps: ['File API is working'] };
+        } catch (error) {
+          if (error.message.includes('403') || error.message.includes('forbidden')) {
+            return { success: true, message: 'File API already installed!', steps: ['File API is working'] };
+          }
+          steps.push('File API not found, proceeding with installation...');
+        }
+      } else {
+        steps.push('Force mode: reinstalling File API...');
+      }
+
+      // Step 2: Check if Code Snippets plugin is installed
+      let codeSnippetsInstalled = false;
+      try {
+        const plugins = await wpReq('/wp/v2/plugins');
+        codeSnippetsInstalled = plugins.some(p =>
+          p.plugin && p.plugin.includes('code-snippets')
+        );
+        if (codeSnippetsInstalled) {
+          steps.push('Code Snippets plugin found');
+        }
+      } catch (error) {
+        steps.push('Could not check plugins: ' + error.message);
+      }
+
+      // Step 3: Install Code Snippets if not present
+      if (!codeSnippetsInstalled) {
+        steps.push('Installing Code Snippets plugin...');
+        try {
+          await wpReq('/wp/v2/plugins', {
+            method: 'POST',
+            body: JSON.stringify({
+              slug: 'code-snippets',
+              status: 'active'
+            })
+          });
+          steps.push('Code Snippets plugin installed and activated!');
+          codeSnippetsInstalled = true;
+        } catch (error) {
+          if (error.message.includes('already installed') || error.message.includes('folder already exists')) {
+            // Plugin exists but might be inactive, try to activate
+            try {
+              await wpReq('/wp/v2/plugins/code-snippets/code-snippets', {
+                method: 'POST',
+                body: JSON.stringify({ status: 'active' })
+              });
+              steps.push('Code Snippets plugin activated');
+              codeSnippetsInstalled = true;
+            } catch (activateError) {
+              steps.push('Could not activate Code Snippets: ' + activateError.message);
+            }
+          } else {
+            steps.push('Could not install Code Snippets: ' + error.message);
+            return {
+              success: false,
+              steps,
+              error: 'Failed to install Code Snippets plugin',
+              manual_instructions: [
+                '1. Go to WordPress Admin > Plugins > Add New',
+                '2. Search for "Code Snippets" and install it',
+                '3. Activate the plugin',
+                '4. Run wp_bootstrap_file_api again'
+              ]
+            };
+          }
+        }
+      }
+
+      // Step 4: Create bootstrap snippet via Code Snippets API
+      const snippetCode = `// Agency OS File API Bootstrap - Run Once
+$mu_dir = ABSPATH . 'wp-content/mu-plugins';
+$file = $mu_dir . '/agency-os-file-api.php';
+if (!file_exists($mu_dir)) wp_mkdir_p($mu_dir);
+
+$code = '<?php
+/**
+ * Plugin Name: Agency OS File API
+ * Version: 1.0.0
+ */
+if (!defined("ABSPATH")) exit;
+
+add_action("rest_api_init", function() {
+    register_rest_route("agency-os/v1", "/create-file", [
+        "methods" => "POST",
+        "callback" => "agency_os_create_file",
+        "permission_callback" => function() { return current_user_can("manage_options"); }
+    ]);
+});
+
+function agency_os_create_file($r) {
+    $path = sanitize_text_field($r->get_param("path"));
+    $content = $r->get_param("content");
+    $overwrite = $r->get_param("overwrite") ?? true;
+
+    $allowed = ["wp-content/mu-plugins/", "wp-content/uploads/"];
+    $ok = false;
+    foreach ($allowed as $d) if (str_starts_with($path, $d)) { $ok = true; break; }
+    if (!$ok) return new WP_Error("forbidden", "Path not allowed", ["status" => 403]);
+    if (strpos($path, "..") !== false) return new WP_Error("invalid", "Path traversal not allowed", ["status" => 400]);
+
+    $full = ABSPATH . $path;
+    wp_mkdir_p(dirname($full));
+
+    if (file_exists($full) && !$overwrite) return new WP_Error("exists", "File exists", ["status" => 409]);
+
+    $bytes = file_put_contents($full, $content);
+    if ($bytes === false) return new WP_Error("failed", "Write failed", ["status" => 500]);
+
+    return ["success" => true, "path" => $full, "bytes" => $bytes];
+}';
+
+$result = file_put_contents($file, $code);
+if ($result === false) {
+    return "Failed to create mu-plugin file";
+}
+return "Agency OS File API installed successfully! ($result bytes)";`;
+
+      steps.push('Creating bootstrap snippet...');
+
+      try {
+        const snippet = await wpReq('/code-snippets/v1/snippets', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: 'Agency OS File API Bootstrap',
+            desc: 'One-time bootstrap to install the File API mu-plugin',
+            code: snippetCode,
+            scope: 'global',
+            active: true
+          })
+        });
+        steps.push('Bootstrap snippet created (ID: ' + snippet.id + ')');
+
+        // Step 5: Verify installation
+        steps.push('Verifying File API installation...');
+
+        // Wait a moment for the snippet to execute
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        try {
+          await wpReq('/agency-os/v1/create-file', {
+            method: 'POST',
+            body: JSON.stringify({ path: '', content: '' })
+          });
+          steps.push('File API verified and working!');
+        } catch (verifyError) {
+          if (verifyError.message.includes('403') || verifyError.message.includes('forbidden')) {
+            steps.push('File API verified and working!');
+          } else {
+            steps.push('File API verification pending - may need page reload on WordPress');
+          }
+        }
+
+        return {
+          success: true,
+          message: 'File API bootstrap complete!',
+          steps,
+          snippet_id: snippet.id
+        };
+
+      } catch (error) {
+        if (error.message.includes('404') || error.message.includes('rest_no_route')) {
+          steps.push('Code Snippets REST API not available (need Pro version or REST API addon)');
+          return {
+            success: false,
+            steps,
+            message: 'Code Snippets installed but REST API not available',
+            manual_instructions: [
+              'Code Snippets free version does not have REST API.',
+              'Options:',
+              '1. Upgrade to Code Snippets Pro, OR',
+              '2. Go to Snippets > Add New in WordPress admin',
+              '3. Paste this code and run once:',
+              '',
+              snippetCode
+            ]
+          };
+        }
+        throw error;
+      }
     }
 
     default:
