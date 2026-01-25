@@ -83,7 +83,11 @@ function strudel_schema_get_config($post_id) {
     $keys = strudel_schema_meta_keys();
 
     $mode = get_post_meta($post_id, $keys['mode'], true);
-    if (!$mode) $mode = 'inherit';
+    if (!$mode) {
+        // Use default from settings, fallback to override
+        $defaults = get_option('strudel_schema_defaults', []);
+        $mode = $defaults['default_mode'] ?? 'override';
+    }
 
     $template = get_post_meta($post_id, $keys['template'], true);
     if (!$template) $template = 'custom';

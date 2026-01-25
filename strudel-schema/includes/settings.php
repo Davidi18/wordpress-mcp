@@ -83,7 +83,7 @@ function strudel_schema_sanitize_defaults($input) {
     return [
         'output_global_schema' => !empty($input['output_global_schema']),
         'default_mode'         => in_array($input['default_mode'] ?? '', ['inherit', 'extend', 'override'])
-                                    ? $input['default_mode'] : 'inherit',
+                                    ? $input['default_mode'] : 'override',
     ];
 }
 
@@ -125,7 +125,7 @@ function strudel_schema_get_defaults() {
     $defaults = get_option('strudel_schema_defaults', []);
     return wp_parse_args($defaults, [
         'output_global_schema' => true,
-        'default_mode'         => 'inherit',
+        'default_mode'         => 'override',
     ]);
 }
 
