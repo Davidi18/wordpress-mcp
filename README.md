@@ -1,8 +1,15 @@
-# WordPress MCP Server v2.2 - Enhanced Edition with HTTP API + Special Pages
+# WordPress MCP Server v3.0 - Enhanced Edition with HTTP API + Schema Management
 
-## 🎉 What's New in v2.2
+## 🎉 What's New in v3.0
 
-**NEW: Special Pages Retrieval** - Get homepage, blog page, and privacy policy page IDs with full details!
+**NEW: Strudel Schema Plugin + MCP Tools** - Manage JSON-LD schema markup across your WordPress sites!
+
+### v3.0 Features:
+- ✨ **Schema Management** - 4 new MCP tools for JSON-LD schema control
+- ✨ **Strudel Schema Plugin** - Bundled WordPress plugin for per-page schema management
+- 🎯 **Template System** - Pre-built templates for Service, AboutPage, FAQ, BlogPosting, and more
+- 🔄 **Override Mode** - Automatically disables Yoast/Rank Math schemas when needed
+- 📡 **REST API** - Full schema control via WordPress REST API
 
 ### v2.2 Features:
 - ✨ **Special Pages API** - `wp_get_special_pages` endpoint for homepage, blog, and privacy policy pages
@@ -109,6 +116,80 @@
 - **`wp_get_site_info`** - Site settings including special page IDs
 - **`wp_get_special_pages`** - Get homepage, blog page, privacy policy page IDs
 - **`wp_get_post_types`** - Available post types
+
+### Schema Management (4 endpoints) ✨ NEW in v3.0!
+- **`wp_get_schema`** - Get schema config for a page/post
+- **`wp_set_schema`** - Set JSON-LD schema (template or custom)
+- **`wp_list_schemas`** - List all pages with schema configured
+- **`wp_preview_schema`** - Preview rendered schema without saving
+
+---
+
+## 📋 Schema Management (Strudel Schema)
+
+### Installation
+
+1. Download `strudel-schema.zip` from the repo
+2. WordPress Admin → Plugins → Add New → Upload Plugin
+3. Activate "Strudel Schema"
+
+### Quick Start
+
+```javascript
+// Set schema for a service page
+wp_set_schema({
+  id: 123,
+  template: 'service',
+  data: {
+    service_name: 'קידום אתרים',
+    service_description: 'שירותי SEO מקצועיים',
+    area_served: 'IL'
+  }
+})
+
+// Set FAQ schema
+wp_set_schema({
+  id: 456,
+  template: 'faq',
+  data: {
+    faqs: [
+      { question: 'כמה זה עולה?', answer: 'תלוי בהיקף הפרויקט' },
+      { question: 'כמה זמן לוקח?', answer: '3-6 חודשים לתוצאות' }
+    ]
+  }
+})
+
+// Custom JSON-LD override
+wp_set_schema({
+  id: 789,
+  template: 'custom',
+  override_json: {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Custom Page"
+  }
+})
+```
+
+### Available Templates
+
+| Template | Use Case | Key Fields |
+|----------|----------|------------|
+| `service` | Service pages | `service_name`, `service_description`, `area_served` |
+| `about` | About pages | `organization_id` |
+| `blog` | Blog posts | Auto-filled from post data |
+| `faq` | FAQ pages | `faqs` (array of Q&A) |
+| `course` | Course pages | `course_name`, `start_date`, `end_date` |
+| `local` | Local business | `business_name`, `telephone`, `address` |
+| `product` | Product pages | `product_name`, `price`, `sku` |
+| `custom` | Full control | Use `override_json` |
+
+### Global Settings
+
+Go to **Settings → Strudel Schema** in WordPress to configure:
+- Organization details (name, logo, phone, email, social links)
+- Website schema
+- Default behavior
 
 ---
 
@@ -742,7 +823,28 @@ npm start
 
 ## 📝 Changelog
 
-### v2.2.0 (Latest)
+### v3.0.0 (Latest)
+
+#### Added
+- 🎯 **Strudel Schema Plugin** - Bundled WordPress plugin for JSON-LD management
+  - Per-page schema control with metabox UI
+  - Global Organization and WebSite schema settings
+  - Automatic Yoast/Rank Math override when enabled
+  - REST API for remote management
+- 📋 **4 New MCP Tools for Schema Management**:
+  - `wp_get_schema` - Get schema configuration for any page/post
+  - `wp_set_schema` - Set schema using templates or custom JSON-LD
+  - `wp_list_schemas` - List all pages with schema configured
+  - `wp_preview_schema` - Preview rendered schema without saving
+- 🎨 **8 Schema Templates**: service, about, blog, faq, course, local, product, custom
+- 🔄 **Override Mode** - Automatically disables competing schema plugins
+
+#### Improved
+- Total MCP tools increased to 40+
+- Better multi-site schema management
+- Simplified plugin UI (override is now default)
+
+### v2.2.0
 
 #### Added
 - ⭐ **Unified HTTP Endpoint** - New `GET /api/site-data` endpoint (RECOMMENDED)
