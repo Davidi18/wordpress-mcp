@@ -58,10 +58,28 @@ function strudel_schema_render_metabox($post) {
             </div>
         <?php endif; ?>
 
-        <div class="strudel-row">
-            <div class="strudel-col">
+        <div class="strudel-section">
+            <label><strong><?php _e('Template', 'strudel-schema'); ?></strong></label>
+            <select name="strudel_schema_template" id="strudel_schema_template" <?php echo $disabled; ?>>
+                <?php foreach ($templates as $key => $label): ?>
+                    <option value="<?php echo esc_attr($key); ?>" <?php selected($cfg['template'], $key); ?>>
+                        <?php echo esc_html($label); ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+
+        <!-- Mode is hidden by default, always override -->
+        <input type="hidden" name="strudel_schema_mode" id="strudel_schema_mode_hidden" value="override">
+
+        <div class="strudel-advanced-toggle">
+            <a href="#" id="strudel_show_advanced"><?php _e('Show advanced options', 'strudel-schema'); ?></a>
+        </div>
+
+        <div class="strudel-advanced-section" id="strudel_advanced_section" style="display: none;">
+            <div class="strudel-section">
                 <label><strong><?php _e('Mode', 'strudel-schema'); ?></strong></label>
-                <select name="strudel_schema_mode" id="strudel_schema_mode" <?php echo $disabled; ?>>
+                <select name="strudel_schema_mode_advanced" id="strudel_schema_mode" <?php echo $disabled; ?>>
                     <?php foreach ($modes as $key => $label): ?>
                         <option value="<?php echo esc_attr($key); ?>" <?php selected($cfg['mode'], $key); ?>>
                             <?php echo esc_html($label); ?>
@@ -69,17 +87,6 @@ function strudel_schema_render_metabox($post) {
                     <?php endforeach; ?>
                 </select>
                 <p class="description" id="strudel_mode_description"></p>
-            </div>
-
-            <div class="strudel-col">
-                <label><strong><?php _e('Template', 'strudel-schema'); ?></strong></label>
-                <select name="strudel_schema_template" id="strudel_schema_template" <?php echo $disabled; ?>>
-                    <?php foreach ($templates as $key => $label): ?>
-                        <option value="<?php echo esc_attr($key); ?>" <?php selected($cfg['template'], $key); ?>>
-                            <?php echo esc_html($label); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
             </div>
         </div>
 
@@ -181,11 +188,13 @@ add_action('save_post', function ($post_id) {
     $is_locked = get_post_meta($post_id, $keys['locked'], true);
     if ($is_locked && !current_user_can('manage_options')) return;
 
-    // Validate and save mode
-    $mode = isset($_POST['strudel_schema_mode']) ? sanitize_text_field($_POST['strudel_schema_mode']) : 'inherit';
+    // Validate and save mode (check advanced field first, then hidden field)
+    $mode = isset($_POST['strudel_schema_mode_advanced'])
+        ? sanitize_text_field($_POST['strudel_schema_mode_advanced'])
+        : (isset($_POST['strudel_schema_mode']) ? sanitize_text_field($_POST['strudel_schema_mode']) : 'override');
     $allowed_modes = array_keys(strudel_schema_get_modes());
     if (!in_array($mode, $allowed_modes, true)) {
-        $mode = 'inherit';
+        $mode = 'override';
     }
     update_post_meta($post_id, $keys['mode'], $mode);
 
@@ -287,6 +296,23 @@ function strudel_schema_admin_css() {
         background: #fcf9e8;
         border-left: 4px solid #dba617;
     }
+    .strudel-advanced-toggle {
+        margin: 10px 0;
+    }
+    .strudel-advanced-toggle a {
+        color: #666;
+        text-decoration: none;
+        font-size: 12px;
+    }
+    .strudel-advanced-toggle a:hover {
+        color: #2271b1;
+    }
+    .strudel-advanced-section {
+        background: #f9f9f9;
+        padding: 15px;
+        border-radius: 4px;
+        margin-bottom: 15px;
+    }
     ';
 }
 
@@ -364,8 +390,27 @@ function strudel_schema_admin_js() {
             validateJson(this);
         });
 
+        // Advanced toggle
+        $('#strudel_show_advanced').on('click', function(e) {
+            e.preventDefault();
+            var $section = $('#strudel_advanced_section');
+            var $link = $(this);
+            $section.slideToggle(200, function() {
+                if ($section.is(':visible')) {
+                    $link.text('Hide advanced options');
+                } else {
+                    $link.text('Show advanced options');
+                }
+            });
+        });
+
+        // Sync advanced mode select with hidden field
+        $('#strudel_schema_mode').on('change', function() {
+            $('#strudel_schema_mode_hidden').val($(this).val());
+            updateModeDescription();
+        });
+
         // Event listeners
-        $('#strudel_schema_mode').on('change', updateModeDescription);
         $('#strudel_schema_template').on('change', updateTemplateHint);
 
         $('.strudel-json-editor').on('blur', function() {

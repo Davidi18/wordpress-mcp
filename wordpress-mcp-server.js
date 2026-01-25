@@ -844,6 +844,58 @@ const tools = [
       type: 'object',
       properties: {}
     }
+  },
+
+  // STRUDEL SCHEMA (requires strudel-schema plugin)
+  {
+    name: 'wp_get_schema',
+    description: 'Get JSON-LD schema configuration for a page/post (requires Strudel Schema plugin)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Post/Page ID', required: true }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_set_schema',
+    description: 'Set JSON-LD schema for a page/post. Templates: service, about, blog, faq, course, local, product, custom',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Post/Page ID', required: true },
+        template: { type: 'string', description: 'Template: service, about, blog, faq, course, local, product, custom' },
+        data: { type: 'object', description: 'Template data (e.g., {service_name: "...", area_served: "IL"})' },
+        override_json: { type: 'object', description: 'Full JSON-LD override (for custom template)' },
+        extra_json: { type: 'object', description: 'Extra schema nodes to merge' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_list_schemas',
+    description: 'List all pages/posts with schema configuration',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        template: { type: 'string', description: 'Filter by template (service, about, etc.)' },
+        per_page: { type: 'number', description: 'Results per page', default: 50 }
+      }
+    }
+  },
+  {
+    name: 'wp_preview_schema',
+    description: 'Preview rendered JSON-LD schema for a page without saving',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Post/Page ID', required: true },
+        template: { type: 'string', description: 'Template to preview' },
+        data: { type: 'object', description: 'Template data to preview' }
+      },
+      required: ['id']
+    }
   }
 ];
 
@@ -1942,6 +1994,52 @@ return "Agency OS File API installed successfully! ($result bytes)";`;
         }
         throw error;
       }
+    }
+
+    // STRUDEL SCHEMA
+    case 'wp_get_schema': {
+      const result = await wpReq(`/strudel-schema/v1/post/${args.id}`);
+      return result;
+    }
+
+    case 'wp_set_schema': {
+      const payload = {
+        mode: 'override' // Always override
+      };
+      if (args.template) payload.template = args.template;
+      if (args.data) payload.data_json = args.data;
+      if (args.override_json) payload.override_json = args.override_json;
+      if (args.extra_json) payload.extra_json = args.extra_json;
+
+      const result = await wpReq(`/strudel-schema/v1/post/${args.id}`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      return result;
+    }
+
+    case 'wp_list_schemas': {
+      const params = new URLSearchParams({
+        per_page: String(args.per_page || 50)
+      });
+      if (args.template) params.append('template', args.template);
+
+      const result = await wpReq(`/strudel-schema/v1/posts?${params}`);
+      return result;
+    }
+
+    case 'wp_preview_schema': {
+      const payload = {
+        mode: 'override'
+      };
+      if (args.template) payload.template = args.template;
+      if (args.data) payload.data_json = args.data;
+
+      const result = await wpReq(`/strudel-schema/v1/post/${args.id}/preview`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      return result;
     }
 
     default:
