@@ -1,8 +1,15 @@
-# WordPress MCP Server v2.2 - Enhanced Edition with HTTP API + Special Pages
+# WordPress MCP Server v3.0 - Enhanced Edition with HTTP API + Schema Management
 
-## 🎉 What's New in v2.2
+## 🎉 What's New in v3.0
 
-**NEW: Special Pages Retrieval** - Get homepage, blog page, and privacy policy page IDs with full details!
+**NEW: Strudel Schema Plugin + MCP Tools** - Manage JSON-LD schema markup across your WordPress sites!
+
+### v3.0 Features:
+- ✨ **Schema Management** - 4 new MCP tools for JSON-LD schema control
+- ✨ **Strudel Schema Plugin** - Bundled WordPress plugin for per-page schema management
+- 🎯 **Template System** - Pre-built templates for Service, AboutPage, FAQ, BlogPosting, and more
+- 🔄 **Override Mode** - Automatically disables Yoast/Rank Math schemas when needed
+- 📡 **REST API** - Full schema control via WordPress REST API
 
 ### v2.2 Features:
 - ✨ **Special Pages API** - `wp_get_special_pages` endpoint for homepage, blog, and privacy policy pages
@@ -109,6 +116,53 @@
 - **`wp_get_site_info`** - Site settings including special page IDs
 - **`wp_get_special_pages`** - Get homepage, blog page, privacy policy page IDs
 - **`wp_get_post_types`** - Available post types
+
+### Schema Management (3 tools) ✨ NEW in v3.0!
+- **`wp_set_schema`** - Set JSON-LD schema for any page (by URL or slug)
+- **`wp_get_schema`** - Get current schema for a page
+- **`wp_list_schemas`** - List all pages with schema
+
+---
+
+## 📋 Schema Management (Strudel Schema)
+
+### Installation
+
+1. Download `strudel-schema.zip` from the repo
+2. WordPress Admin → Plugins → Add New → Upload Plugin
+3. Activate "Strudel Schema"
+
+### In WordPress
+
+Edit any page/post → find **"Schema (JSON-LD)"** box → paste your schema → Save.
+
+When schema is set, Yoast/Rank Math schemas are automatically disabled for that page.
+
+### Via MCP
+
+```javascript
+// Set schema - just URL + JSON-LD
+wp_set_schema({
+  url: "https://site.com/services/seo",
+  schema: {
+    "@context": "https://schema.org",
+    "@type": "Service",
+    "name": "קידום אתרים",
+    "provider": {
+      "@type": "Organization",
+      "name": "Strudel Marketing"
+    }
+  }
+})
+
+// Get current schema
+wp_get_schema({ url: "https://site.com/about" })
+
+// List all pages with schema
+wp_list_schemas()
+```
+
+**That's it.** No templates, no settings, no complexity. Just paste JSON-LD.
 
 ---
 
@@ -742,7 +796,24 @@ npm start
 
 ## 📝 Changelog
 
-### v2.2.0 (Latest)
+### v3.0.0 (Latest)
+
+#### Added
+- 🎯 **Strudel Schema Plugin** - Bundled WordPress plugin for JSON-LD management
+  - Global Organization and WebSite schema settings
+  - Automatic Yoast/Rank Math override
+  - REST API for MCP integration
+- 📋 **3 MCP Tools for Schema**:
+  - `wp_set_schema` - Set any JSON-LD for any page (by URL or slug)
+  - `wp_get_schema` - Get current schema
+  - `wp_list_schemas` - List pages with schema
+- 🔄 **Full Freedom** - No templates required, just pass any JSON-LD you want
+
+#### Improved
+- Simple API: just URL + JSON-LD
+- Auto-disables Yoast/Rank Math when schema is set
+
+### v2.2.0
 
 #### Added
 - ⭐ **Unified HTTP Endpoint** - New `GET /api/site-data` endpoint (RECOMMENDED)
