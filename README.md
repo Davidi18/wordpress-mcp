@@ -117,11 +117,10 @@
 - **`wp_get_special_pages`** - Get homepage, blog page, privacy policy page IDs
 - **`wp_get_post_types`** - Available post types
 
-### Schema Management (4 endpoints) ✨ NEW in v3.0!
-- **`wp_get_schema`** - Get schema config for a page/post
-- **`wp_set_schema`** - Set JSON-LD schema (template or custom)
-- **`wp_list_schemas`** - List all pages with schema configured
-- **`wp_preview_schema`** - Preview rendered schema without saving
+### Schema Management (3 tools) ✨ NEW in v3.0!
+- **`wp_set_schema`** - Set JSON-LD schema for any page (by URL or slug)
+- **`wp_get_schema`** - Get current schema for a page
+- **`wp_list_schemas`** - List all pages with schema
 
 ---
 
@@ -132,64 +131,43 @@
 1. Download `strudel-schema.zip` from the repo
 2. WordPress Admin → Plugins → Add New → Upload Plugin
 3. Activate "Strudel Schema"
+4. Go to **Settings → Strudel Schema** and fill Organization details (once)
 
-### Quick Start
+### Usage - Simple!
 
 ```javascript
-// Set schema for a service page
+// Set schema for any page - just URL + JSON-LD
 wp_set_schema({
-  id: 123,
-  template: 'service',
-  data: {
-    service_name: 'קידום אתרים',
-    service_description: 'שירותי SEO מקצועיים',
-    area_served: 'IL'
-  }
-})
-
-// Set FAQ schema
-wp_set_schema({
-  id: 456,
-  template: 'faq',
-  data: {
-    faqs: [
-      { question: 'כמה זה עולה?', answer: 'תלוי בהיקף הפרויקט' },
-      { question: 'כמה זמן לוקח?', answer: '3-6 חודשים לתוצאות' }
-    ]
-  }
-})
-
-// Custom JSON-LD override
-wp_set_schema({
-  id: 789,
-  template: 'custom',
-  override_json: {
+  url: "https://site.com/services/seo",
+  schema: {
     "@context": "https://schema.org",
-    "@type": "WebPage",
-    "name": "Custom Page"
+    "@type": "Service",
+    "name": "קידום אתרים",
+    "provider": {
+      "@type": "Organization",
+      "name": "Strudel Marketing"
+    }
   }
 })
+
+// Or use slug
+wp_set_schema({
+  slug: "about",
+  schema: {
+    "@context": "https://schema.org",
+    "@type": "AboutPage",
+    "name": "אודות"
+  }
+})
+
+// Get current schema
+wp_get_schema({ url: "https://site.com/about" })
+
+// List all pages with schema
+wp_list_schemas()
 ```
 
-### Available Templates
-
-| Template | Use Case | Key Fields |
-|----------|----------|------------|
-| `service` | Service pages | `service_name`, `service_description`, `area_served` |
-| `about` | About pages | `organization_id` |
-| `blog` | Blog posts | Auto-filled from post data |
-| `faq` | FAQ pages | `faqs` (array of Q&A) |
-| `course` | Course pages | `course_name`, `start_date`, `end_date` |
-| `local` | Local business | `business_name`, `telephone`, `address` |
-| `product` | Product pages | `product_name`, `price`, `sku` |
-| `custom` | Full control | Use `override_json` |
-
-### Global Settings
-
-Go to **Settings → Strudel Schema** in WordPress to configure:
-- Organization details (name, logo, phone, email, social links)
-- Website schema
-- Default behavior
+**That's it.** No templates, no IDs, no complexity. Just URL + JSON-LD.
 
 ---
 
@@ -827,22 +805,18 @@ npm start
 
 #### Added
 - 🎯 **Strudel Schema Plugin** - Bundled WordPress plugin for JSON-LD management
-  - Per-page schema control with metabox UI
   - Global Organization and WebSite schema settings
-  - Automatic Yoast/Rank Math override when enabled
-  - REST API for remote management
-- 📋 **4 New MCP Tools for Schema Management**:
-  - `wp_get_schema` - Get schema configuration for any page/post
-  - `wp_set_schema` - Set schema using templates or custom JSON-LD
-  - `wp_list_schemas` - List all pages with schema configured
-  - `wp_preview_schema` - Preview rendered schema without saving
-- 🎨 **8 Schema Templates**: service, about, blog, faq, course, local, product, custom
-- 🔄 **Override Mode** - Automatically disables competing schema plugins
+  - Automatic Yoast/Rank Math override
+  - REST API for MCP integration
+- 📋 **3 MCP Tools for Schema**:
+  - `wp_set_schema` - Set any JSON-LD for any page (by URL or slug)
+  - `wp_get_schema` - Get current schema
+  - `wp_list_schemas` - List pages with schema
+- 🔄 **Full Freedom** - No templates required, just pass any JSON-LD you want
 
 #### Improved
-- Total MCP tools increased to 40+
-- Better multi-site schema management
-- Simplified plugin UI (override is now default)
+- Simple API: just URL + JSON-LD
+- Auto-disables Yoast/Rank Math when schema is set
 
 ### v2.2.0
 
