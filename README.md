@@ -131,12 +131,17 @@
 1. Download `strudel-schema.zip` from the repo
 2. WordPress Admin → Plugins → Add New → Upload Plugin
 3. Activate "Strudel Schema"
-4. Go to **Settings → Strudel Schema** and fill Organization details (once)
 
-### Usage - Simple!
+### In WordPress
+
+Edit any page/post → find **"Schema (JSON-LD)"** box → paste your schema → Save.
+
+When schema is set, Yoast/Rank Math schemas are automatically disabled for that page.
+
+### Via MCP
 
 ```javascript
-// Set schema for any page - just URL + JSON-LD
+// Set schema - just URL + JSON-LD
 wp_set_schema({
   url: "https://site.com/services/seo",
   schema: {
@@ -150,16 +155,6 @@ wp_set_schema({
   }
 })
 
-// Or use slug
-wp_set_schema({
-  slug: "about",
-  schema: {
-    "@context": "https://schema.org",
-    "@type": "AboutPage",
-    "name": "אודות"
-  }
-})
-
 // Get current schema
 wp_get_schema({ url: "https://site.com/about" })
 
@@ -167,7 +162,7 @@ wp_get_schema({ url: "https://site.com/about" })
 wp_list_schemas()
 ```
 
-**That's it.** No templates, no IDs, no complexity. Just URL + JSON-LD.
+**That's it.** No templates, no settings, no complexity. Just paste JSON-LD.
 
 ---
 
