@@ -1,11 +1,11 @@
 <?php
 /**
  * Plugin Name: Strudel Schema
- * Plugin URI: https://strudel.co.il
+ * Plugin URI: https://strudel.marketing
  * Description: Single-source JSON-LD schema with per-page UI, override modes, and REST API for MCP integration.
  * Version: 0.1.0
  * Author: Strudel Marketing
- * Author URI: https://strudel.co.il
+ * Author URI: https://strudel.marketing
  * Text Domain: strudel-schema
  * Domain Path: /languages
  * Requires at least: 5.8
@@ -19,6 +19,7 @@ define('STRUDEL_SCHEMA_PATH', plugin_dir_path(__FILE__));
 define('STRUDEL_SCHEMA_URL', plugin_dir_url(__FILE__));
 
 // Load components
+require_once STRUDEL_SCHEMA_PATH . 'includes/settings.php';
 require_once STRUDEL_SCHEMA_PATH . 'includes/render.php';
 require_once STRUDEL_SCHEMA_PATH . 'includes/admin.php';
 require_once STRUDEL_SCHEMA_PATH . 'includes/rest.php';
