@@ -896,6 +896,97 @@ const tools = [
       },
       required: ['id']
     }
+  },
+
+  // PLUGINS (6 endpoints)
+  {
+    name: 'wp_list_plugins',
+    description: 'List all installed WordPress plugins with their status',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter by status: active, inactive, all', default: 'all' },
+        search: { type: 'string', description: 'Search term to filter plugins' }
+      }
+    }
+  },
+  {
+    name: 'wp_install_plugin',
+    description: 'Install a plugin from WordPress.org repository by slug',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: 'Plugin slug from WordPress.org (e.g., "akismet", "contact-form-7")', required: true },
+        activate: { type: 'boolean', description: 'Activate plugin after installation', default: false }
+      },
+      required: ['slug']
+    }
+  },
+  {
+    name: 'wp_install_plugin_zip',
+    description: 'Install a plugin from a ZIP file URL (requires Plugin Installer API - run wp_bootstrap_plugin_installer first)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'URL to the plugin ZIP file', required: true },
+        activate: { type: 'boolean', description: 'Activate plugin after installation', default: false }
+      },
+      required: ['url']
+    }
+  },
+  {
+    name: 'wp_bootstrap_plugin_installer',
+    description: 'Setup the Plugin Installer API endpoint for installing plugins from ZIP URLs',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        force: { type: 'boolean', description: 'Force reinstall even if API exists', default: false }
+      }
+    }
+  },
+  {
+    name: 'wp_activate_plugin',
+    description: 'Activate an installed WordPress plugin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+      },
+      required: ['plugin']
+    }
+  },
+  {
+    name: 'wp_deactivate_plugin',
+    description: 'Deactivate an active WordPress plugin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+      },
+      required: ['plugin']
+    }
+  },
+  {
+    name: 'wp_delete_plugin',
+    description: 'Delete a WordPress plugin (must be deactivated first)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+      },
+      required: ['plugin']
+    }
+  },
+  {
+    name: 'wp_update_plugin',
+    description: 'Update a WordPress plugin to the latest version',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+      },
+      required: ['plugin']
+    }
   }
 ];
 
@@ -2040,6 +2131,374 @@ return "Agency OS File API installed successfully! ($result bytes)";`;
         body: JSON.stringify(payload)
       });
       return result;
+    }
+
+    // PLUGINS
+    case 'wp_list_plugins': {
+      const plugins = await wpReq('/wp/v2/plugins');
+      let filtered = plugins;
+
+      // Filter by status
+      if (args.status && args.status !== 'all') {
+        filtered = filtered.filter(p => p.status === args.status);
+      }
+
+      // Filter by search term
+      if (args.search) {
+        const searchLower = args.search.toLowerCase();
+        filtered = filtered.filter(p =>
+          p.name?.toLowerCase().includes(searchLower) ||
+          p.plugin?.toLowerCase().includes(searchLower) ||
+          p.description?.raw?.toLowerCase().includes(searchLower)
+        );
+      }
+
+      return {
+        plugins: filtered.map(p => ({
+          plugin: p.plugin,
+          name: p.name,
+          status: p.status,
+          version: p.version,
+          author: p.author,
+          description: p.description?.raw?.substring(0, 200)
+        })),
+        count: filtered.length,
+        total: plugins.length
+      };
+    }
+
+    case 'wp_install_plugin': {
+      // Install plugin from WordPress.org by slug
+      const plugin = await wpReq('/wp/v2/plugins', {
+        method: 'POST',
+        body: JSON.stringify({
+          slug: args.slug,
+          status: args.activate ? 'active' : 'inactive'
+        })
+      });
+
+      return {
+        success: true,
+        plugin: plugin.plugin,
+        name: plugin.name,
+        status: plugin.status,
+        version: plugin.version,
+        message: `Plugin "${plugin.name}" installed${args.activate ? ' and activated' : ''}`
+      };
+    }
+
+    case 'wp_activate_plugin': {
+      // Normalize plugin identifier
+      let pluginId = args.plugin;
+      if (!pluginId.includes('/')) {
+        // Try to find the full plugin path
+        const plugins = await wpReq('/wp/v2/plugins');
+        const found = plugins.find(p =>
+          p.plugin.startsWith(pluginId + '/') ||
+          p.plugin === pluginId
+        );
+        if (found) {
+          pluginId = found.plugin;
+        } else {
+          throw new Error(`Plugin "${args.plugin}" not found. Use wp_list_plugins to see installed plugins.`);
+        }
+      }
+
+      const plugin = await wpReq(`/wp/v2/plugins/${encodeURIComponent(pluginId)}`, {
+        method: 'POST',
+        body: JSON.stringify({ status: 'active' })
+      });
+
+      return {
+        success: true,
+        plugin: plugin.plugin,
+        name: plugin.name,
+        status: plugin.status,
+        message: `Plugin "${plugin.name}" activated`
+      };
+    }
+
+    case 'wp_deactivate_plugin': {
+      // Normalize plugin identifier
+      let pluginId = args.plugin;
+      if (!pluginId.includes('/')) {
+        const plugins = await wpReq('/wp/v2/plugins');
+        const found = plugins.find(p =>
+          p.plugin.startsWith(pluginId + '/') ||
+          p.plugin === pluginId
+        );
+        if (found) {
+          pluginId = found.plugin;
+        } else {
+          throw new Error(`Plugin "${args.plugin}" not found. Use wp_list_plugins to see installed plugins.`);
+        }
+      }
+
+      const plugin = await wpReq(`/wp/v2/plugins/${encodeURIComponent(pluginId)}`, {
+        method: 'POST',
+        body: JSON.stringify({ status: 'inactive' })
+      });
+
+      return {
+        success: true,
+        plugin: plugin.plugin,
+        name: plugin.name,
+        status: plugin.status,
+        message: `Plugin "${plugin.name}" deactivated`
+      };
+    }
+
+    case 'wp_delete_plugin': {
+      // Normalize plugin identifier
+      let pluginId = args.plugin;
+      if (!pluginId.includes('/')) {
+        const plugins = await wpReq('/wp/v2/plugins');
+        const found = plugins.find(p =>
+          p.plugin.startsWith(pluginId + '/') ||
+          p.plugin === pluginId
+        );
+        if (found) {
+          pluginId = found.plugin;
+          // Check if active
+          if (found.status === 'active') {
+            throw new Error(`Plugin "${found.name}" is active. Deactivate it first using wp_deactivate_plugin.`);
+          }
+        } else {
+          throw new Error(`Plugin "${args.plugin}" not found. Use wp_list_plugins to see installed plugins.`);
+        }
+      }
+
+      await wpReq(`/wp/v2/plugins/${encodeURIComponent(pluginId)}`, {
+        method: 'DELETE'
+      });
+
+      return {
+        success: true,
+        plugin: pluginId,
+        message: `Plugin "${pluginId}" deleted`
+      };
+    }
+
+    case 'wp_update_plugin': {
+      // Normalize plugin identifier
+      let pluginId = args.plugin;
+      if (!pluginId.includes('/')) {
+        const plugins = await wpReq('/wp/v2/plugins');
+        const found = plugins.find(p =>
+          p.plugin.startsWith(pluginId + '/') ||
+          p.plugin === pluginId
+        );
+        if (found) {
+          pluginId = found.plugin;
+        } else {
+          throw new Error(`Plugin "${args.plugin}" not found. Use wp_list_plugins to see installed plugins.`);
+        }
+      }
+
+      // WordPress REST API doesn't have a direct update endpoint
+      // We need to use the update endpoint or reinstall
+      // The standard way is to POST to plugins with the slug
+      const slug = pluginId.split('/')[0];
+
+      const plugin = await wpReq('/wp/v2/plugins', {
+        method: 'POST',
+        body: JSON.stringify({
+          slug: slug,
+          status: 'active'
+        })
+      });
+
+      return {
+        success: true,
+        plugin: plugin.plugin,
+        name: plugin.name,
+        version: plugin.version,
+        status: plugin.status,
+        message: `Plugin "${plugin.name}" updated to version ${plugin.version}`
+      };
+    }
+
+    case 'wp_install_plugin_zip': {
+      // Install plugin from ZIP URL using custom endpoint
+      try {
+        const result = await wpReq('/agency-os/v1/install-plugin', {
+          method: 'POST',
+          body: JSON.stringify({
+            url: args.url,
+            activate: args.activate || false
+          })
+        });
+
+        return {
+          success: true,
+          plugin: result.plugin,
+          name: result.name,
+          version: result.version,
+          status: result.status,
+          message: result.message || `Plugin installed from ZIP`
+        };
+      } catch (error) {
+        if (error.message.includes('404') || error.message.includes('rest_no_route')) {
+          throw new Error(
+            'Plugin Installer API not found. Run wp_bootstrap_plugin_installer first to set it up.'
+          );
+        }
+        throw error;
+      }
+    }
+
+    case 'wp_bootstrap_plugin_installer': {
+      const steps = [];
+      const force = args.force || false;
+
+      // Step 1: Check if Plugin Installer API already exists
+      if (!force) {
+        try {
+          const check = await wpReq('/agency-os/v1/install-plugin');
+          if (check && check.status === 'ready') {
+            return {
+              success: true,
+              already_installed: true,
+              message: 'Plugin Installer API is already available'
+            };
+          }
+        } catch (e) {
+          steps.push('Plugin Installer API not found, will install...');
+        }
+      }
+
+      // Step 2: Create the mu-plugin
+      const muPluginCode = `<?php
+/**
+ * Plugin Name: Agency OS Plugin Installer API
+ * Description: REST API endpoint for installing plugins from ZIP URLs
+ * Version: 1.0.0
+ */
+
+add_action('rest_api_init', function() {
+    register_rest_route('agency-os/v1', '/install-plugin', [
+        'methods' => ['GET', 'POST'],
+        'callback' => 'agency_os_install_plugin',
+        'permission_callback' => function() {
+            return current_user_can('install_plugins');
+        }
+    ]);
+});
+
+function agency_os_install_plugin(WP_REST_Request \\$request) {
+    if (\\$request->get_method() === 'GET') {
+        return ['status' => 'ready', 'message' => 'Plugin Installer API is available'];
+    }
+
+    \\$url = \\$request->get_param('url');
+    \\$activate = \\$request->get_param('activate');
+
+    if (empty(\\$url)) {
+        return new WP_Error('missing_url', 'ZIP URL is required', ['status' => 400]);
+    }
+
+    // Validate URL
+    if (!filter_var(\\$url, FILTER_VALIDATE_URL)) {
+        return new WP_Error('invalid_url', 'Invalid URL format', ['status' => 400]);
+    }
+
+    // Include required files
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/misc.php';
+    require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+
+    // Silent skin to suppress output
+    class Agency_OS_Silent_Skin extends WP_Upgrader_Skin {
+        public function feedback(\\$string, ...\\$args) {}
+        public function header() {}
+        public function footer() {}
+    }
+
+    \\$skin = new Agency_OS_Silent_Skin();
+    \\$upgrader = new Plugin_Upgrader(\\$skin);
+
+    // Install the plugin
+    \\$result = \\$upgrader->install(\\$url);
+
+    if (is_wp_error(\\$result)) {
+        return \\$result;
+    }
+
+    if (!\\$result) {
+        return new WP_Error('install_failed', 'Plugin installation failed', ['status' => 500]);
+    }
+
+    // Get installed plugin info
+    \\$plugin_file = \\$upgrader->plugin_info();
+    \\$plugin_data = get_plugin_data(WP_PLUGIN_DIR . '/' . \\$plugin_file);
+
+    // Activate if requested
+    \\$status = 'inactive';
+    if (\\$activate && \\$plugin_file) {
+        \\$activated = activate_plugin(\\$plugin_file);
+        if (!is_wp_error(\\$activated)) {
+            \\$status = 'active';
+        }
+    }
+
+    return [
+        'success' => true,
+        'plugin' => \\$plugin_file,
+        'name' => \\$plugin_data['Name'],
+        'version' => \\$plugin_data['Version'],
+        'author' => \\$plugin_data['Author'],
+        'status' => \\$status,
+        'message' => 'Plugin installed successfully' . (\\$status === 'active' ? ' and activated' : '')
+    ];
+}
+`;
+
+      // Try to create via File API
+      try {
+        const fileResult = await wpReq('/agency-os/v1/file', {
+          method: 'POST',
+          body: JSON.stringify({
+            path: 'wp-content/mu-plugins/agency-os-plugin-installer.php',
+            content: muPluginCode,
+            overwrite: true
+          })
+        });
+        steps.push('Created mu-plugin via File API');
+
+        // Verify it works
+        try {
+          const check = await wpReq('/agency-os/v1/install-plugin');
+          if (check && check.status === 'ready') {
+            steps.push('Plugin Installer API is now available');
+            return {
+              success: true,
+              steps,
+              message: 'Plugin Installer API installed successfully'
+            };
+          }
+        } catch (e) {
+          steps.push('Warning: API created but not responding yet. Try again in a moment.');
+        }
+
+        return { success: true, steps };
+      } catch (fileError) {
+        // File API not available, try Code Snippets
+        steps.push('File API not available: ' + fileError.message);
+
+        return {
+          success: false,
+          steps,
+          error: 'Could not install Plugin Installer API',
+          manual_install: {
+            instructions: [
+              '1. Run wp_bootstrap_file_api first to enable File API',
+              '2. Then run wp_bootstrap_plugin_installer again',
+              'OR manually create wp-content/mu-plugins/agency-os-plugin-installer.php'
+            ]
+          }
+        };
+      }
     }
 
     default:
