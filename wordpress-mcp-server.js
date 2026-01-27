@@ -896,6 +896,75 @@ const tools = [
       },
       required: ['id']
     }
+  },
+
+  // PLUGINS (6 endpoints)
+  {
+    name: 'wp_list_plugins',
+    description: 'List all installed WordPress plugins with their status',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter by status: active, inactive, all', default: 'all' },
+        search: { type: 'string', description: 'Search term to filter plugins' }
+      }
+    }
+  },
+  {
+    name: 'wp_install_plugin',
+    description: 'Install a plugin from WordPress.org repository by slug',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: 'Plugin slug from WordPress.org (e.g., "akismet", "contact-form-7")', required: true },
+        activate: { type: 'boolean', description: 'Activate plugin after installation', default: false }
+      },
+      required: ['slug']
+    }
+  },
+  {
+    name: 'wp_activate_plugin',
+    description: 'Activate an installed WordPress plugin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+      },
+      required: ['plugin']
+    }
+  },
+  {
+    name: 'wp_deactivate_plugin',
+    description: 'Deactivate an active WordPress plugin',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+      },
+      required: ['plugin']
+    }
+  },
+  {
+    name: 'wp_delete_plugin',
+    description: 'Delete a WordPress plugin (must be deactivated first)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+      },
+      required: ['plugin']
+    }
+  },
+  {
+    name: 'wp_update_plugin',
+    description: 'Update a WordPress plugin to the latest version',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+      },
+      required: ['plugin']
+    }
   }
 ];
 
@@ -2040,6 +2109,191 @@ return "Agency OS File API installed successfully! ($result bytes)";`;
         body: JSON.stringify(payload)
       });
       return result;
+    }
+
+    // PLUGINS
+    case 'wp_list_plugins': {
+      const plugins = await wpReq('/wp/v2/plugins');
+      let filtered = plugins;
+
+      // Filter by status
+      if (args.status && args.status !== 'all') {
+        filtered = filtered.filter(p => p.status === args.status);
+      }
+
+      // Filter by search term
+      if (args.search) {
+        const searchLower = args.search.toLowerCase();
+        filtered = filtered.filter(p =>
+          p.name?.toLowerCase().includes(searchLower) ||
+          p.plugin?.toLowerCase().includes(searchLower) ||
+          p.description?.raw?.toLowerCase().includes(searchLower)
+        );
+      }
+
+      return {
+        plugins: filtered.map(p => ({
+          plugin: p.plugin,
+          name: p.name,
+          status: p.status,
+          version: p.version,
+          author: p.author,
+          description: p.description?.raw?.substring(0, 200)
+        })),
+        count: filtered.length,
+        total: plugins.length
+      };
+    }
+
+    case 'wp_install_plugin': {
+      // Install plugin from WordPress.org by slug
+      const plugin = await wpReq('/wp/v2/plugins', {
+        method: 'POST',
+        body: JSON.stringify({
+          slug: args.slug,
+          status: args.activate ? 'active' : 'inactive'
+        })
+      });
+
+      return {
+        success: true,
+        plugin: plugin.plugin,
+        name: plugin.name,
+        status: plugin.status,
+        version: plugin.version,
+        message: `Plugin "${plugin.name}" installed${args.activate ? ' and activated' : ''}`
+      };
+    }
+
+    case 'wp_activate_plugin': {
+      // Normalize plugin identifier
+      let pluginId = args.plugin;
+      if (!pluginId.includes('/')) {
+        // Try to find the full plugin path
+        const plugins = await wpReq('/wp/v2/plugins');
+        const found = plugins.find(p =>
+          p.plugin.startsWith(pluginId + '/') ||
+          p.plugin === pluginId
+        );
+        if (found) {
+          pluginId = found.plugin;
+        } else {
+          throw new Error(`Plugin "${args.plugin}" not found. Use wp_list_plugins to see installed plugins.`);
+        }
+      }
+
+      const plugin = await wpReq(`/wp/v2/plugins/${encodeURIComponent(pluginId)}`, {
+        method: 'POST',
+        body: JSON.stringify({ status: 'active' })
+      });
+
+      return {
+        success: true,
+        plugin: plugin.plugin,
+        name: plugin.name,
+        status: plugin.status,
+        message: `Plugin "${plugin.name}" activated`
+      };
+    }
+
+    case 'wp_deactivate_plugin': {
+      // Normalize plugin identifier
+      let pluginId = args.plugin;
+      if (!pluginId.includes('/')) {
+        const plugins = await wpReq('/wp/v2/plugins');
+        const found = plugins.find(p =>
+          p.plugin.startsWith(pluginId + '/') ||
+          p.plugin === pluginId
+        );
+        if (found) {
+          pluginId = found.plugin;
+        } else {
+          throw new Error(`Plugin "${args.plugin}" not found. Use wp_list_plugins to see installed plugins.`);
+        }
+      }
+
+      const plugin = await wpReq(`/wp/v2/plugins/${encodeURIComponent(pluginId)}`, {
+        method: 'POST',
+        body: JSON.stringify({ status: 'inactive' })
+      });
+
+      return {
+        success: true,
+        plugin: plugin.plugin,
+        name: plugin.name,
+        status: plugin.status,
+        message: `Plugin "${plugin.name}" deactivated`
+      };
+    }
+
+    case 'wp_delete_plugin': {
+      // Normalize plugin identifier
+      let pluginId = args.plugin;
+      if (!pluginId.includes('/')) {
+        const plugins = await wpReq('/wp/v2/plugins');
+        const found = plugins.find(p =>
+          p.plugin.startsWith(pluginId + '/') ||
+          p.plugin === pluginId
+        );
+        if (found) {
+          pluginId = found.plugin;
+          // Check if active
+          if (found.status === 'active') {
+            throw new Error(`Plugin "${found.name}" is active. Deactivate it first using wp_deactivate_plugin.`);
+          }
+        } else {
+          throw new Error(`Plugin "${args.plugin}" not found. Use wp_list_plugins to see installed plugins.`);
+        }
+      }
+
+      await wpReq(`/wp/v2/plugins/${encodeURIComponent(pluginId)}`, {
+        method: 'DELETE'
+      });
+
+      return {
+        success: true,
+        plugin: pluginId,
+        message: `Plugin "${pluginId}" deleted`
+      };
+    }
+
+    case 'wp_update_plugin': {
+      // Normalize plugin identifier
+      let pluginId = args.plugin;
+      if (!pluginId.includes('/')) {
+        const plugins = await wpReq('/wp/v2/plugins');
+        const found = plugins.find(p =>
+          p.plugin.startsWith(pluginId + '/') ||
+          p.plugin === pluginId
+        );
+        if (found) {
+          pluginId = found.plugin;
+        } else {
+          throw new Error(`Plugin "${args.plugin}" not found. Use wp_list_plugins to see installed plugins.`);
+        }
+      }
+
+      // WordPress REST API doesn't have a direct update endpoint
+      // We need to use the update endpoint or reinstall
+      // The standard way is to POST to plugins with the slug
+      const slug = pluginId.split('/')[0];
+
+      const plugin = await wpReq('/wp/v2/plugins', {
+        method: 'POST',
+        body: JSON.stringify({
+          slug: slug,
+          status: 'active'
+        })
+      });
+
+      return {
+        success: true,
+        plugin: plugin.plugin,
+        name: plugin.name,
+        version: plugin.version,
+        status: plugin.status,
+        message: `Plugin "${plugin.name}" updated to version ${plugin.version}`
+      };
     }
 
     default:
