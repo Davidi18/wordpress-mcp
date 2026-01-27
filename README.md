@@ -1,8 +1,17 @@
-# WordPress MCP Server v2.2 - Enhanced Edition with HTTP API + Special Pages
+# WordPress MCP Server v2.3 - Enhanced Edition with Plugin Management
 
-## 🎉 What's New in v2.2
+## 🎉 What's New in v2.3
 
-**NEW: Special Pages Retrieval** - Get homepage, blog page, and privacy policy page IDs with full details!
+**NEW: Full Plugin Management** - Install, activate, deactivate, update, and delete WordPress plugins directly via MCP!
+
+### v2.3 Features:
+- 🔌 **Plugin Management** - Complete CRUD for WordPress plugins
+- 📦 **Install from WordPress.org** - `wp_install_plugin` by slug
+- 📥 **Install from ZIP URL** - `wp_install_plugin_zip` from any URL
+- ✅ **Activate/Deactivate** - `wp_activate_plugin`, `wp_deactivate_plugin`
+- 🗑️ **Delete Plugins** - `wp_delete_plugin` (must be deactivated first)
+- 🔄 **Update Plugins** - `wp_update_plugin` to latest version
+- 📋 **List Plugins** - `wp_list_plugins` with status/search filters
 
 ### v2.2 Features:
 - ✨ **Special Pages API** - `wp_get_special_pages` endpoint for homepage, blog, and privacy policy pages
@@ -110,6 +119,16 @@
 - **`wp_get_special_pages`** - Get homepage, blog page, privacy policy page IDs
 - **`wp_get_post_types`** - Available post types
 
+### Plugins (8 endpoints) ✨ ALL NEW in v2.3!
+- **`wp_list_plugins`** - List all plugins with status/search filters
+- **`wp_install_plugin`** - Install from WordPress.org by slug
+- **`wp_install_plugin_zip`** - Install from ZIP URL
+- **`wp_activate_plugin`** - Activate an installed plugin
+- **`wp_deactivate_plugin`** - Deactivate an active plugin
+- **`wp_delete_plugin`** - Delete a plugin (must be deactivated)
+- **`wp_update_plugin`** - Update to latest version
+- **`wp_bootstrap_plugin_installer`** - Setup ZIP installer API
+
 ---
 
 ## 🚀 Usage Examples
@@ -184,6 +203,101 @@
 // show_on_front, page_on_front, page_for_posts, etc.
 ```
 
+### Plugin Management (NEW in v2.3!)
+
+#### List Installed Plugins
+```javascript
+// List all plugins
+{
+  "tool": "wp_list_plugins",
+  "args": {}
+}
+
+// List only active plugins
+{
+  "tool": "wp_list_plugins",
+  "args": { "status": "active" }
+}
+
+// Search for plugins
+{
+  "tool": "wp_list_plugins",
+  "args": { "search": "seo" }
+}
+```
+
+#### Install Plugin from WordPress.org
+```javascript
+{
+  "tool": "wp_install_plugin",
+  "args": {
+    "slug": "contact-form-7",
+    "activate": true
+  }
+}
+```
+
+#### Install Plugin from ZIP URL
+```javascript
+// First, setup the installer API (one-time)
+{
+  "tool": "wp_bootstrap_plugin_installer",
+  "args": {}
+}
+
+// Then install from any ZIP URL
+{
+  "tool": "wp_install_plugin_zip",
+  "args": {
+    "url": "https://github.com/user/plugin/releases/download/v1.0/plugin.zip",
+    "activate": true
+  }
+}
+```
+
+#### Activate/Deactivate Plugins
+```javascript
+// Activate (supports short name or full path)
+{
+  "tool": "wp_activate_plugin",
+  "args": { "plugin": "akismet" }
+}
+
+// Or with full path
+{
+  "tool": "wp_activate_plugin",
+  "args": { "plugin": "akismet/akismet.php" }
+}
+
+// Deactivate
+{
+  "tool": "wp_deactivate_plugin",
+  "args": { "plugin": "hello-dolly" }
+}
+```
+
+#### Update Plugin
+```javascript
+{
+  "tool": "wp_update_plugin",
+  "args": { "plugin": "akismet" }
+}
+```
+
+#### Delete Plugin
+```javascript
+// Must deactivate first!
+{
+  "tool": "wp_deactivate_plugin",
+  "args": { "plugin": "hello-dolly" }
+}
+
+{
+  "tool": "wp_delete_plugin",
+  "args": { "plugin": "hello-dolly" }
+}
+```
+
 ### Get Special Pages (Homepage, Blog, Privacy Policy)
 ```javascript
 {
@@ -203,7 +317,7 @@
 
 ## 📈 API Coverage Statistics
 
-| Content Type | Before v2.0 | After v2.0 | Coverage |
+| Content Type | Before v2.0 | After v2.3 | Coverage |
 |--------------|-------------|------------|----------|
 | Posts | 5 endpoints | 5 endpoints | 100% ✅ |
 | Pages | 5 endpoints | 5 endpoints | 100% ✅ |
@@ -212,8 +326,9 @@
 | Users | 0 endpoints | 3 endpoints | 75% ✨ |
 | Taxonomy | 2 endpoints | 6 endpoints | 100% ✨ |
 | Custom Posts | 3 endpoints | 3 endpoints | 100% ✅ |
-| Site Info | 0 endpoints | 3 endpoints | NEW ✨ |
-| **TOTAL** | **18 endpoints** | **36 endpoints** | **100% more!** |
+| Site Info | 0 endpoints | 3 endpoints | 100% ✨ |
+| **Plugins** | 0 endpoints | **8 endpoints** | **NEW ✨** |
+| **TOTAL** | **18 endpoints** | **44 endpoints** | **144% more!** |
 
 ---
 
@@ -742,7 +857,27 @@ npm start
 
 ## 📝 Changelog
 
-### v2.2.0 (Latest)
+### v2.3.0 (Latest)
+
+#### Added
+- 🔌 **Plugin Management** - Complete plugin lifecycle management via MCP
+  - `wp_list_plugins` - List all plugins with status and search filters
+  - `wp_install_plugin` - Install plugins from WordPress.org by slug
+  - `wp_install_plugin_zip` - Install plugins from any ZIP URL
+  - `wp_activate_plugin` - Activate installed plugins
+  - `wp_deactivate_plugin` - Deactivate active plugins
+  - `wp_delete_plugin` - Delete plugins (must be deactivated first)
+  - `wp_update_plugin` - Update plugins to latest version
+  - `wp_bootstrap_plugin_installer` - Setup custom REST endpoint for ZIP installation
+- 📦 **ZIP Installation Support** - Install plugins from GitHub releases, private repos, or any URL
+- 🔧 **Smart Plugin Resolution** - Use short names (`akismet`) or full paths (`akismet/akismet.php`)
+
+#### Improved
+- Total MCP tools increased from 36 to **44 endpoints** (144% increase from v1.0!)
+- Better error messages for plugin operations
+- Automatic plugin path resolution
+
+### v2.2.0
 
 #### Added
 - ⭐ **Unified HTTP Endpoint** - New `GET /api/site-data` endpoint (RECOMMENDED)
