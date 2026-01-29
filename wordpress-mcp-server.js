@@ -1238,16 +1238,20 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_create_post': {
+      const postData = {
+        title: args.title,
+        content: args.content,
+        status: args.status || 'draft',
+        excerpt: args.excerpt,
+        categories: args.categories,
+        tags: args.tags
+      };
+      if (args.slug) postData.slug = args.slug;
+      if (args.featured_media) postData.featured_media = args.featured_media;
+      if (args.meta) postData.meta = args.meta;
       const post = await wpReq('/wp/v2/posts', {
         method: 'POST',
-        body: JSON.stringify({
-          title: args.title,
-          content: args.content,
-          status: args.status || 'draft',
-          excerpt: args.excerpt,
-          categories: args.categories,
-          tags: args.tags
-        })
+        body: JSON.stringify(postData)
       });
       return {
         id: post.id,
