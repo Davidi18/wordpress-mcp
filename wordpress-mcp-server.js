@@ -898,6 +898,34 @@ const tools = [
     }
   },
 
+  // SEO ROBOTS (index/noindex - requires Yoast SEO or Rank Math + strudel-schema plugin)
+  {
+    name: 'wp_get_seo_robots',
+    description: 'Get SEO robots settings (index/noindex, follow/nofollow) for a post. Works with Yoast SEO or Rank Math.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Post/Page ID', required: true }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_set_seo_robots',
+    description: 'Set SEO robots settings for a post. Works with Yoast SEO or Rank Math. Set noindex:true to prevent indexing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Post/Page ID', required: true },
+        noindex: { type: 'boolean', description: 'Set to true to add noindex (prevent search engine indexing)' },
+        nofollow: { type: 'boolean', description: 'Set to true to add nofollow (prevent following links)' },
+        noarchive: { type: 'boolean', description: 'Set to true to add noarchive (prevent caching) - Rank Math only' },
+        nosnippet: { type: 'boolean', description: 'Set to true to add nosnippet (prevent snippets) - Rank Math only' }
+      },
+      required: ['id']
+    }
+  },
+
   // PLUGINS (6 endpoints)
   {
     name: 'wp_list_plugins',
@@ -2131,6 +2159,26 @@ return "Agency OS File API installed successfully! ($result bytes)";`;
       if (args.data) payload.data_json = args.data;
 
       const result = await wpReq(`/strudel-schema/v1/post/${args.id}/preview`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      return result;
+    }
+
+    // SEO ROBOTS
+    case 'wp_get_seo_robots': {
+      const result = await wpReq(`/strudel-schema/v1/seo-robots/${args.id}`);
+      return result;
+    }
+
+    case 'wp_set_seo_robots': {
+      const payload = {};
+      if (args.noindex !== undefined) payload.noindex = args.noindex;
+      if (args.nofollow !== undefined) payload.nofollow = args.nofollow;
+      if (args.noarchive !== undefined) payload.noarchive = args.noarchive;
+      if (args.nosnippet !== undefined) payload.nosnippet = args.nosnippet;
+
+      const result = await wpReq(`/strudel-schema/v1/seo-robots/${args.id}`, {
         method: 'POST',
         body: JSON.stringify(payload)
       });
