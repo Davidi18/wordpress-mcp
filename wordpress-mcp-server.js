@@ -308,6 +308,9 @@ async function wpRequest(endpoint, options = {}) {
     url = `${url}${separator}consumer_key=${WC_KEY}&consumer_secret=${WC_SECRET}`;
   }
 
+  // Debug logging
+  console.log(`🌐 wpRequest URL: ${url.replace(/consumer_secret=[^&]+/, 'consumer_secret=***')}`);
+
   const response = await fetch(url, {
     ...options,
     headers: {
@@ -352,6 +355,9 @@ function createWpRequestForClient(clientConfig) {
       const separator = url.includes('?') ? '&' : '?';
       url = `${url}${separator}consumer_key=${clientConfig.wc_key}&consumer_secret=${clientConfig.wc_secret}`;
     }
+
+    // Debug logging
+    console.log(`🌐 wpRequestForClient [${clientConfig.name}] URL: ${url.replace(/consumer_secret=[^&]+/, 'consumer_secret=***')}`);
 
     const response = await fetch(url, {
       ...options,
@@ -2861,7 +2867,8 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
       if (args.featured !== undefined) params.append('featured', String(args.featured));
       if (args.on_sale !== undefined) params.append('on_sale', String(args.on_sale));
 
-      const products = await wpReq(`/wc/v3/products?${params}`);
+      const queryString = params.toString();
+      const products = await wpReq(`/wc/v3/products${queryString ? '?' + queryString : ''}`);
       return {
         products: products.map(p => ({
           id: p.id,
@@ -2977,7 +2984,8 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
       if (args.parent !== undefined) params.append('parent', String(args.parent));
       if (args.hide_empty !== undefined) params.append('hide_empty', String(args.hide_empty));
 
-      const categories = await wpReq(`/wc/v3/products/categories?${params}`);
+      const queryString = params.toString();
+      const categories = await wpReq(`/wc/v3/products/categories${queryString ? '?' + queryString : ''}`);
       return {
         categories: categories.map(c => ({
           id: c.id,
@@ -3053,7 +3061,8 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
       const params = new URLSearchParams();
       if (args.per_page) params.append('per_page', String(args.per_page));
 
-      const variations = await wpReq(`/wc/v3/products/${args.product_id}/variations?${params}`);
+      const queryString = params.toString();
+      const variations = await wpReq(`/wc/v3/products/${args.product_id}/variations${queryString ? '?' + queryString : ''}`);
       return {
         product_id: args.product_id,
         variations: variations.map(v => ({
@@ -3142,7 +3151,8 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
       if (args.after) params.append('after', args.after);
       if (args.before) params.append('before', args.before);
 
-      const orders = await wpReq(`/wc/v3/orders?${params}`);
+      const queryString = params.toString();
+      const orders = await wpReq(`/wc/v3/orders${queryString ? '?' + queryString : ''}`);
       return {
         orders: orders.map(o => ({
           id: o.id,
