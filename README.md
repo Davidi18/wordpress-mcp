@@ -412,6 +412,31 @@ Control how search engines index your content. Works with **Yoast SEO** or **Ran
 
 Full WooCommerce support for managing products, categories, variations, and orders.
 
+#### ⚙️ WooCommerce Setup (Required)
+
+WooCommerce REST API requires **separate authentication** from WordPress. You need to generate API keys:
+
+1. Go to **WooCommerce → Settings → Advanced → REST API**
+2. Click **"Add key"**
+3. Enter description: `MCP Server`
+4. Set Permissions: **Read/Write**
+5. Click **"Generate API key"**
+6. Copy the **Consumer Key** (starts with `ck_`) and **Consumer Secret** (starts with `cs_`)
+
+⚠️ **Important:** The secret is shown only once! Save it immediately.
+
+**Add to your `.env` file:**
+
+```bash
+# Default client
+WC_CONSUMER_KEY=ck_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+WC_CONSUMER_SECRET=cs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Or for specific clients (e.g., client9)
+CLIENT9_WC_CONSUMER_KEY=ck_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+CLIENT9_WC_CONSUMER_SECRET=cs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
 #### List Products
 ```javascript
 {
