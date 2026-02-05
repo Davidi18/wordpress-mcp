@@ -101,6 +101,34 @@ add_action('rest_api_init', function () {
             'json' => ['required' => true],
         ],
     ]);
+
+    // SEO Robots (index/noindex) - GET/POST
+    register_rest_route($namespace, '/seo-robots/(?P<id>\d+)', [
+        [
+            'methods'             => WP_REST_Server::READABLE,
+            'callback'            => 'strudel_schema_rest_get_seo_robots',
+            'permission_callback' => 'strudel_schema_rest_permission_read',
+            'args'                => [
+                'id' => [
+                    'validate_callback' => function ($param) {
+                        return is_numeric($param);
+                    },
+                ],
+            ],
+        ],
+        [
+            'methods'             => WP_REST_Server::EDITABLE,
+            'callback'            => 'strudel_schema_rest_set_seo_robots',
+            'permission_callback' => 'strudel_schema_rest_permission_edit',
+            'args'                => [
+                'id'        => ['required' => true],
+                'noindex'   => ['required' => false, 'type' => 'boolean'],
+                'nofollow'  => ['required' => false, 'type' => 'boolean'],
+                'noarchive' => ['required' => false, 'type' => 'boolean'],
+                'nosnippet' => ['required' => false, 'type' => 'boolean'],
+            ],
+        ],
+    ]);
 });
 
 /**
@@ -460,4 +488,156 @@ function strudel_schema_rest_validate(WP_REST_Request $request) {
         'valid'  => true,
         'parsed' => json_decode($json, true),
     ], 200);
+}
+
+/**
+ * Detect which SEO plugin is active
+ * @return string|null 'yoast', 'rankmath', or null
+ */
+function strudel_schema_detect_seo_plugin() {
+    // Check Yoast SEO
+    if (defined('WPSEO_VERSION') || class_exists('WPSEO_Meta')) {
+        return 'yoast';
+    }
+    // Check Rank Math
+    if (defined('RANK_MATH_VERSION') || class_exists('RankMath')) {
+        return 'rankmath';
+    }
+    return null;
+}
+
+/**
+ * GET SEO robots settings for a post
+ */
+function strudel_schema_rest_get_seo_robots(WP_REST_Request $request) {
+    $post_id = (int) $request['id'];
+
+    $post = get_post($post_id);
+    if (!$post) {
+        return new WP_Error('not_found', __('Post not found', 'strudel-schema'), ['status' => 404]);
+    }
+
+    $plugin = strudel_schema_detect_seo_plugin();
+
+    $robots = [
+        'noindex'   => false,
+        'nofollow'  => false,
+        'noarchive' => false,
+        'nosnippet' => false,
+    ];
+
+    if ($plugin === 'yoast') {
+        // Yoast uses individual meta keys
+        // Value '1' = noindex, '2' or empty = index (site default)
+        $noindex = get_post_meta($post_id, '_yoast_wpseo_meta-robots-noindex', true);
+        $nofollow = get_post_meta($post_id, '_yoast_wpseo_meta-robots-nofollow', true);
+
+        $robots['noindex'] = ($noindex === '1');
+        $robots['nofollow'] = ($nofollow === '1');
+        // Yoast handles noarchive/nosnippet at site level, not per-post in free version
+
+    } elseif ($plugin === 'rankmath') {
+        // Rank Math uses a serialized array in rank_math_robots
+        $rm_robots = get_post_meta($post_id, 'rank_math_robots', true);
+
+        if (is_array($rm_robots)) {
+            $robots['noindex'] = in_array('noindex', $rm_robots, true);
+            $robots['nofollow'] = in_array('nofollow', $rm_robots, true);
+            $robots['noarchive'] = in_array('noarchive', $rm_robots, true);
+            $robots['nosnippet'] = in_array('nosnippet', $rm_robots, true);
+        }
+    }
+
+    return new WP_REST_Response([
+        'post_id'    => $post_id,
+        'post_type'  => $post->post_type,
+        'title'      => $post->post_title,
+        'seo_plugin' => $plugin,
+        'robots'     => $robots,
+    ], 200);
+}
+
+/**
+ * POST/PUT SEO robots settings for a post
+ */
+function strudel_schema_rest_set_seo_robots(WP_REST_Request $request) {
+    $post_id = (int) $request['id'];
+
+    $post = get_post($post_id);
+    if (!$post) {
+        return new WP_Error('not_found', __('Post not found', 'strudel-schema'), ['status' => 404]);
+    }
+
+    $plugin = strudel_schema_detect_seo_plugin();
+
+    if (!$plugin) {
+        return new WP_Error(
+            'no_seo_plugin',
+            __('No supported SEO plugin detected (Yoast SEO or Rank Math required)', 'strudel-schema'),
+            ['status' => 400]
+        );
+    }
+
+    // Get current robots settings
+    $noindex = $request->get_param('noindex');
+    $nofollow = $request->get_param('nofollow');
+    $noarchive = $request->get_param('noarchive');
+    $nosnippet = $request->get_param('nosnippet');
+
+    if ($plugin === 'yoast') {
+        // Yoast: '1' = noindex/nofollow, '2' = index/follow (explicit), '' = site default
+        if ($noindex !== null) {
+            update_post_meta($post_id, '_yoast_wpseo_meta-robots-noindex', $noindex ? '1' : '2');
+        }
+        if ($nofollow !== null) {
+            update_post_meta($post_id, '_yoast_wpseo_meta-robots-nofollow', $nofollow ? '1' : '0');
+        }
+        // Note: Yoast free doesn't support per-post noarchive/nosnippet
+
+    } elseif ($plugin === 'rankmath') {
+        // Rank Math: array of robot directives
+        $rm_robots = get_post_meta($post_id, 'rank_math_robots', true);
+        if (!is_array($rm_robots)) {
+            $rm_robots = ['index', 'follow']; // Default
+        }
+
+        // Helper to toggle directive
+        $toggle = function($directives, $on_value, $off_value, $should_be_on) {
+            // Remove both values first
+            $directives = array_diff($directives, [$on_value, $off_value]);
+            // Add the correct one
+            $directives[] = $should_be_on ? $on_value : $off_value;
+            return array_values($directives);
+        };
+
+        if ($noindex !== null) {
+            $rm_robots = $toggle($rm_robots, 'noindex', 'index', $noindex);
+        }
+        if ($nofollow !== null) {
+            $rm_robots = $toggle($rm_robots, 'nofollow', 'follow', $nofollow);
+        }
+        if ($noarchive !== null) {
+            if ($noarchive) {
+                if (!in_array('noarchive', $rm_robots, true)) {
+                    $rm_robots[] = 'noarchive';
+                }
+            } else {
+                $rm_robots = array_values(array_diff($rm_robots, ['noarchive']));
+            }
+        }
+        if ($nosnippet !== null) {
+            if ($nosnippet) {
+                if (!in_array('nosnippet', $rm_robots, true)) {
+                    $rm_robots[] = 'nosnippet';
+                }
+            } else {
+                $rm_robots = array_values(array_diff($rm_robots, ['nosnippet']));
+            }
+        }
+
+        update_post_meta($post_id, 'rank_math_robots', $rm_robots);
+    }
+
+    // Return updated settings
+    return strudel_schema_rest_get_seo_robots($request);
 }
