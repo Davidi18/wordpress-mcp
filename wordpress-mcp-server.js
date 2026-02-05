@@ -898,10 +898,10 @@ const tools = [
     }
   },
 
-  // SEO ROBOTS (index/noindex - requires Yoast SEO or Rank Math + strudel-schema plugin)
+  // SEO ROBOTS (index/noindex - requires strudel-schema plugin + Yoast SEO or Rank Math)
   {
     name: 'wp_get_seo_robots',
-    description: 'Get SEO robots settings (index/noindex, follow/nofollow) for a post. Works with Yoast SEO or Rank Math.',
+    description: 'Get SEO robots settings (index/noindex, follow/nofollow) for a post. Requires strudel-schema plugin + Yoast/Rank Math.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -912,7 +912,7 @@ const tools = [
   },
   {
     name: 'wp_set_seo_robots',
-    description: 'Set SEO robots settings for a post. Works with Yoast SEO or Rank Math. Set noindex:true to prevent indexing.',
+    description: 'Set SEO robots settings for a post. Requires strudel-schema plugin. Set noindex:true to prevent indexing.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2165,7 +2165,7 @@ return "Agency OS File API installed successfully! ($result bytes)";`;
       return result;
     }
 
-    // SEO ROBOTS
+    // SEO ROBOTS (requires strudel-schema plugin)
     case 'wp_get_seo_robots': {
       const result = await wpReq(`/strudel-schema/v1/seo-robots/${args.id}`);
       return result;
