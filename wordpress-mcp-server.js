@@ -129,10 +129,12 @@ async function getClientConfig(clientId = null) {
       url: process.env.WP_API_URL,
       username: process.env.WP_API_USERNAME,
       password: process.env.WP_API_PASSWORD,
+      wc_key: process.env.WC_CONSUMER_KEY,
+      wc_secret: process.env.WC_CONSUMER_SECRET,
       domain: extractDomain(process.env.WP_API_URL)
     });
   }
-  
+
   // CLIENT1 through CLIENT20
   for (let i = 1; i <= 20; i++) {
     const prefix = `CLIENT${i}`;
@@ -143,6 +145,8 @@ async function getClientConfig(clientId = null) {
         url: url,
         username: process.env[`${prefix}_WP_API_USERNAME`],
         password: process.env[`${prefix}_WP_API_PASSWORD`],
+        wc_key: process.env[`${prefix}_WC_CONSUMER_KEY`],
+        wc_secret: process.env[`${prefix}_WC_CONSUMER_SECRET`],
         domain: extractDomain(url)
       });
     }
@@ -155,6 +159,8 @@ async function getClientConfig(clientId = null) {
       url: defaultClient?.url,
       username: defaultClient?.username,
       password: defaultClient?.password,
+      wc_key: defaultClient?.wc_key,
+      wc_secret: defaultClient?.wc_secret,
       name: 'default',
       source: 'env'
     };
@@ -184,6 +190,8 @@ async function getClientConfig(clientId = null) {
       url: matched.url,
       username: matched.username,
       password: matched.password,
+      wc_key: matched.wc_key,
+      wc_secret: matched.wc_secret,
       name: matched.id,
       source: 'env'
     };
@@ -280,11 +288,29 @@ if (!WP_API_URL || !WP_API_USERNAME || !WP_API_PASSWORD) {
 const baseURL = WP_API_URL.replace(/\/+$/, '');
 const wpApiBase = baseURL.includes('/wp-json') ? baseURL : `${baseURL}/wp-json`;
 const authHeader = 'Basic ' + Buffer.from(`${WP_API_USERNAME}:${WP_API_PASSWORD}`).toString('base64');
+const WC_KEY = initConfig.wc_key;
+const WC_SECRET = initConfig.wc_secret;
 
 console.log(`🚀 Default Client: ${initConfig.name} (${initConfig.source})`);
+if (WC_KEY) console.log(`🛒 WooCommerce: Credentials configured`);
 
 async function wpRequest(endpoint, options = {}) {
-  const url = `${wpApiBase}${endpoint}`;
+  let url = `${wpApiBase}${endpoint}`;
+
+  // WooCommerce endpoints use consumer key/secret authentication
+  if (endpoint.startsWith('/wc/')) {
+    if (!WC_KEY || !WC_SECRET) {
+      throw new Error(
+        `WooCommerce credentials not configured. Add WC_CONSUMER_KEY and WC_CONSUMER_SECRET to your environment.`
+      );
+    }
+    const separator = url.includes('?') ? '&' : '?';
+    url = `${url}${separator}consumer_key=${WC_KEY}&consumer_secret=${WC_SECRET}`;
+  }
+
+  // Debug logging
+  console.log(`🌐 wpRequest URL: ${url.replace(/consumer_secret=[^&]+/, 'consumer_secret=***')}`);
+
   const response = await fetch(url, {
     ...options,
     headers: {
@@ -316,7 +342,23 @@ function createWpRequestForClient(clientConfig) {
   const authHeader = 'Basic ' + Buffer.from(`${clientConfig.username}:${clientConfig.password}`).toString('base64');
 
   return async function(endpoint, options = {}) {
-    const url = `${wpApiBase}${endpoint}`;
+    let url = `${wpApiBase}${endpoint}`;
+
+    // WooCommerce endpoints use consumer key/secret authentication
+    if (endpoint.startsWith('/wc/')) {
+      if (!clientConfig.wc_key || !clientConfig.wc_secret) {
+        throw new Error(
+          `WooCommerce credentials not configured for this client. ` +
+          `Add ${clientConfig.name === 'default' ? 'WC_CONSUMER_KEY and WC_CONSUMER_SECRET' : `CLIENT${clientConfig.name.replace('client', '').toUpperCase()}_WC_CONSUMER_KEY and CLIENT${clientConfig.name.replace('client', '').toUpperCase()}_WC_CONSUMER_SECRET`} to your environment.`
+        );
+      }
+      const separator = url.includes('?') ? '&' : '?';
+      url = `${url}${separator}consumer_key=${clientConfig.wc_key}&consumer_secret=${clientConfig.wc_secret}`;
+    }
+
+    // Debug logging
+    console.log(`🌐 wpRequestForClient [${clientConfig.name}] URL: ${url.replace(/consumer_secret=[^&]+/, 'consumer_secret=***')}`);
+
     const response = await fetch(url, {
       ...options,
       headers: {
@@ -2825,7 +2867,8 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
       if (args.featured !== undefined) params.append('featured', String(args.featured));
       if (args.on_sale !== undefined) params.append('on_sale', String(args.on_sale));
 
-      const products = await wpReq(`/wc/v3/products?${params}`);
+      const queryString = params.toString();
+      const products = await wpReq(`/wc/v3/products${queryString ? '?' + queryString : ''}`);
       return {
         products: products.map(p => ({
           id: p.id,
@@ -2941,7 +2984,8 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
       if (args.parent !== undefined) params.append('parent', String(args.parent));
       if (args.hide_empty !== undefined) params.append('hide_empty', String(args.hide_empty));
 
-      const categories = await wpReq(`/wc/v3/products/categories?${params}`);
+      const queryString = params.toString();
+      const categories = await wpReq(`/wc/v3/products/categories${queryString ? '?' + queryString : ''}`);
       return {
         categories: categories.map(c => ({
           id: c.id,
@@ -3017,7 +3061,8 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
       const params = new URLSearchParams();
       if (args.per_page) params.append('per_page', String(args.per_page));
 
-      const variations = await wpReq(`/wc/v3/products/${args.product_id}/variations?${params}`);
+      const queryString = params.toString();
+      const variations = await wpReq(`/wc/v3/products/${args.product_id}/variations${queryString ? '?' + queryString : ''}`);
       return {
         product_id: args.product_id,
         variations: variations.map(v => ({
@@ -3106,7 +3151,8 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
       if (args.after) params.append('after', args.after);
       if (args.before) params.append('before', args.before);
 
-      const orders = await wpReq(`/wc/v3/orders?${params}`);
+      const queryString = params.toString();
+      const orders = await wpReq(`/wc/v3/orders${queryString ? '?' + queryString : ''}`);
       return {
         orders: orders.map(o => ({
           id: o.id,
