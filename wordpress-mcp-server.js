@@ -1015,6 +1015,265 @@ const tools = [
       },
       required: ['plugin']
     }
+  },
+
+  // WOOCOMMERCE PRODUCTS (requires WooCommerce plugin)
+  {
+    name: 'wc_list_products',
+    description: 'List WooCommerce products with optional filters',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        per_page: { type: 'number', description: 'Products per page (max 100)', default: 20 },
+        page: { type: 'number', description: 'Page number', default: 1 },
+        search: { type: 'string', description: 'Search term' },
+        category: { type: 'number', description: 'Category ID to filter by' },
+        status: { type: 'string', description: 'Status: publish, draft, pending, private, any', default: 'any' },
+        type: { type: 'string', description: 'Product type: simple, grouped, external, variable' },
+        sku: { type: 'string', description: 'Search by SKU' },
+        featured: { type: 'boolean', description: 'Filter featured products' },
+        on_sale: { type: 'boolean', description: 'Filter products on sale' }
+      }
+    }
+  },
+  {
+    name: 'wc_get_product',
+    description: 'Get a single WooCommerce product by ID',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Product ID', required: true }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wc_create_product',
+    description: 'Create a new WooCommerce product',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Product name', required: true },
+        type: { type: 'string', description: 'Product type: simple, grouped, external, variable', default: 'simple' },
+        status: { type: 'string', description: 'Status: draft, pending, publish, private', default: 'publish' },
+        regular_price: { type: 'string', description: 'Regular price' },
+        sale_price: { type: 'string', description: 'Sale price' },
+        description: { type: 'string', description: 'Full product description' },
+        short_description: { type: 'string', description: 'Short description' },
+        sku: { type: 'string', description: 'SKU (Stock Keeping Unit)' },
+        categories: { type: 'array', description: 'Array of category objects [{id: 1}, {id: 2}]' },
+        images: { type: 'array', description: 'Array of image objects [{src: "url"}, {id: 123}]' },
+        manage_stock: { type: 'boolean', description: 'Enable stock management' },
+        stock_quantity: { type: 'number', description: 'Stock quantity' },
+        stock_status: { type: 'string', description: 'Stock status: instock, outofstock, onbackorder' },
+        weight: { type: 'string', description: 'Product weight' },
+        dimensions: { type: 'object', description: 'Dimensions: {length, width, height}' },
+        attributes: { type: 'array', description: 'Product attributes array' },
+        meta_data: { type: 'array', description: 'Meta data array [{key, value}]' }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'wc_update_product',
+    description: 'Update an existing WooCommerce product',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Product ID', required: true },
+        name: { type: 'string', description: 'Product name' },
+        status: { type: 'string', description: 'Status: draft, pending, publish, private' },
+        regular_price: { type: 'string', description: 'Regular price' },
+        sale_price: { type: 'string', description: 'Sale price' },
+        description: { type: 'string', description: 'Full product description' },
+        short_description: { type: 'string', description: 'Short description' },
+        sku: { type: 'string', description: 'SKU' },
+        categories: { type: 'array', description: 'Array of category objects [{id: 1}]' },
+        images: { type: 'array', description: 'Array of image objects [{src: "url"}, {id: 123}]' },
+        manage_stock: { type: 'boolean', description: 'Enable stock management' },
+        stock_quantity: { type: 'number', description: 'Stock quantity' },
+        stock_status: { type: 'string', description: 'Stock status: instock, outofstock, onbackorder' },
+        featured: { type: 'boolean', description: 'Featured product' },
+        meta_data: { type: 'array', description: 'Meta data array [{key, value}]' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wc_delete_product',
+    description: 'Delete a WooCommerce product',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Product ID', required: true },
+        force: { type: 'boolean', description: 'True to permanently delete, false to move to trash', default: false }
+      },
+      required: ['id']
+    }
+  },
+
+  // WOOCOMMERCE PRODUCT CATEGORIES
+  {
+    name: 'wc_list_categories',
+    description: 'List WooCommerce product categories',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        per_page: { type: 'number', description: 'Categories per page', default: 100 },
+        search: { type: 'string', description: 'Search term' },
+        parent: { type: 'number', description: 'Parent category ID' },
+        hide_empty: { type: 'boolean', description: 'Hide empty categories', default: false }
+      }
+    }
+  },
+  {
+    name: 'wc_create_category',
+    description: 'Create a WooCommerce product category',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Category name', required: true },
+        slug: { type: 'string', description: 'Category slug' },
+        parent: { type: 'number', description: 'Parent category ID' },
+        description: { type: 'string', description: 'Category description' },
+        image: { type: 'object', description: 'Category image {src: "url"} or {id: 123}' }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'wc_update_category',
+    description: 'Update a WooCommerce product category',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Category ID', required: true },
+        name: { type: 'string', description: 'Category name' },
+        slug: { type: 'string', description: 'Category slug' },
+        parent: { type: 'number', description: 'Parent category ID' },
+        description: { type: 'string', description: 'Category description' },
+        image: { type: 'object', description: 'Category image {src: "url"} or {id: 123}' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wc_delete_category',
+    description: 'Delete a WooCommerce product category',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Category ID', required: true },
+        force: { type: 'boolean', description: 'Force delete (required for categories)', default: true }
+      },
+      required: ['id']
+    }
+  },
+
+  // WOOCOMMERCE PRODUCT VARIATIONS (for variable products)
+  {
+    name: 'wc_list_variations',
+    description: 'List variations for a variable product',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        product_id: { type: 'number', description: 'Parent product ID', required: true },
+        per_page: { type: 'number', description: 'Variations per page', default: 100 }
+      },
+      required: ['product_id']
+    }
+  },
+  {
+    name: 'wc_create_variation',
+    description: 'Create a variation for a variable product',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        product_id: { type: 'number', description: 'Parent product ID', required: true },
+        regular_price: { type: 'string', description: 'Regular price' },
+        sale_price: { type: 'string', description: 'Sale price' },
+        sku: { type: 'string', description: 'SKU' },
+        stock_quantity: { type: 'number', description: 'Stock quantity' },
+        stock_status: { type: 'string', description: 'Stock status: instock, outofstock, onbackorder' },
+        attributes: { type: 'array', description: 'Variation attributes [{name: "Color", option: "Red"}]', required: true },
+        image: { type: 'object', description: 'Variation image {src: "url"} or {id: 123}' }
+      },
+      required: ['product_id', 'attributes']
+    }
+  },
+  {
+    name: 'wc_update_variation',
+    description: 'Update a product variation',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        product_id: { type: 'number', description: 'Parent product ID', required: true },
+        variation_id: { type: 'number', description: 'Variation ID', required: true },
+        regular_price: { type: 'string', description: 'Regular price' },
+        sale_price: { type: 'string', description: 'Sale price' },
+        sku: { type: 'string', description: 'SKU' },
+        stock_quantity: { type: 'number', description: 'Stock quantity' },
+        stock_status: { type: 'string', description: 'Stock status' },
+        image: { type: 'object', description: 'Variation image' }
+      },
+      required: ['product_id', 'variation_id']
+    }
+  },
+  {
+    name: 'wc_delete_variation',
+    description: 'Delete a product variation',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        product_id: { type: 'number', description: 'Parent product ID', required: true },
+        variation_id: { type: 'number', description: 'Variation ID', required: true },
+        force: { type: 'boolean', description: 'Force permanent delete', default: true }
+      },
+      required: ['product_id', 'variation_id']
+    }
+  },
+
+  // WOOCOMMERCE ORDERS
+  {
+    name: 'wc_list_orders',
+    description: 'List WooCommerce orders',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        per_page: { type: 'number', description: 'Orders per page', default: 20 },
+        page: { type: 'number', description: 'Page number', default: 1 },
+        status: { type: 'string', description: 'Status: pending, processing, on-hold, completed, cancelled, refunded, failed, any' },
+        customer: { type: 'number', description: 'Customer ID' },
+        product: { type: 'number', description: 'Product ID to filter by' },
+        after: { type: 'string', description: 'Orders after date (ISO8601)' },
+        before: { type: 'string', description: 'Orders before date (ISO8601)' }
+      }
+    }
+  },
+  {
+    name: 'wc_get_order',
+    description: 'Get a single WooCommerce order',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Order ID', required: true }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wc_update_order',
+    description: 'Update a WooCommerce order (status, notes, etc.)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Order ID', required: true },
+        status: { type: 'string', description: 'Order status' },
+        customer_note: { type: 'string', description: 'Note for customer' },
+        meta_data: { type: 'array', description: 'Meta data array [{key, value}]' }
+      },
+      required: ['id']
+    }
   }
 ];
 
@@ -2551,6 +2810,347 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
           }
         };
       }
+    }
+
+    // WOOCOMMERCE PRODUCTS
+    case 'wc_list_products': {
+      const params = new URLSearchParams();
+      if (args.per_page) params.append('per_page', String(args.per_page));
+      if (args.page) params.append('page', String(args.page));
+      if (args.search) params.append('search', args.search);
+      if (args.category) params.append('category', String(args.category));
+      if (args.status) params.append('status', args.status);
+      if (args.type) params.append('type', args.type);
+      if (args.sku) params.append('sku', args.sku);
+      if (args.featured !== undefined) params.append('featured', String(args.featured));
+      if (args.on_sale !== undefined) params.append('on_sale', String(args.on_sale));
+
+      const products = await wpReq(`/wc/v3/products?${params}`);
+      return {
+        products: products.map(p => ({
+          id: p.id,
+          name: p.name,
+          slug: p.slug,
+          type: p.type,
+          status: p.status,
+          sku: p.sku,
+          price: p.price,
+          regular_price: p.regular_price,
+          sale_price: p.sale_price,
+          stock_status: p.stock_status,
+          stock_quantity: p.stock_quantity,
+          categories: p.categories,
+          images: p.images?.map(img => ({ id: img.id, src: img.src, alt: img.alt })),
+          permalink: p.permalink
+        })),
+        count: products.length
+      };
+    }
+
+    case 'wc_get_product': {
+      const product = await wpReq(`/wc/v3/products/${args.id}`);
+      return product;
+    }
+
+    case 'wc_create_product': {
+      const payload = { name: args.name };
+      if (args.type) payload.type = args.type;
+      if (args.status) payload.status = args.status;
+      if (args.regular_price) payload.regular_price = args.regular_price;
+      if (args.sale_price) payload.sale_price = args.sale_price;
+      if (args.description) payload.description = args.description;
+      if (args.short_description) payload.short_description = args.short_description;
+      if (args.sku) payload.sku = args.sku;
+      if (args.categories) payload.categories = args.categories;
+      if (args.images) payload.images = args.images;
+      if (args.manage_stock !== undefined) payload.manage_stock = args.manage_stock;
+      if (args.stock_quantity !== undefined) payload.stock_quantity = args.stock_quantity;
+      if (args.stock_status) payload.stock_status = args.stock_status;
+      if (args.weight) payload.weight = args.weight;
+      if (args.dimensions) payload.dimensions = args.dimensions;
+      if (args.attributes) payload.attributes = args.attributes;
+      if (args.meta_data) payload.meta_data = args.meta_data;
+
+      const product = await wpReq('/wc/v3/products', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      return {
+        success: true,
+        product: {
+          id: product.id,
+          name: product.name,
+          slug: product.slug,
+          permalink: product.permalink,
+          status: product.status,
+          type: product.type
+        }
+      };
+    }
+
+    case 'wc_update_product': {
+      const payload = {};
+      if (args.name) payload.name = args.name;
+      if (args.status) payload.status = args.status;
+      if (args.regular_price) payload.regular_price = args.regular_price;
+      if (args.sale_price !== undefined) payload.sale_price = args.sale_price;
+      if (args.description) payload.description = args.description;
+      if (args.short_description) payload.short_description = args.short_description;
+      if (args.sku) payload.sku = args.sku;
+      if (args.categories) payload.categories = args.categories;
+      if (args.images) payload.images = args.images;
+      if (args.manage_stock !== undefined) payload.manage_stock = args.manage_stock;
+      if (args.stock_quantity !== undefined) payload.stock_quantity = args.stock_quantity;
+      if (args.stock_status) payload.stock_status = args.stock_status;
+      if (args.featured !== undefined) payload.featured = args.featured;
+      if (args.meta_data) payload.meta_data = args.meta_data;
+
+      const product = await wpReq(`/wc/v3/products/${args.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      return {
+        success: true,
+        product: {
+          id: product.id,
+          name: product.name,
+          slug: product.slug,
+          permalink: product.permalink,
+          status: product.status
+        }
+      };
+    }
+
+    case 'wc_delete_product': {
+      const params = args.force ? '?force=true' : '';
+      const result = await wpReq(`/wc/v3/products/${args.id}${params}`, {
+        method: 'DELETE'
+      });
+      return {
+        success: true,
+        deleted: result.id,
+        message: args.force ? 'Product permanently deleted' : 'Product moved to trash'
+      };
+    }
+
+    // WOOCOMMERCE CATEGORIES
+    case 'wc_list_categories': {
+      const params = new URLSearchParams();
+      if (args.per_page) params.append('per_page', String(args.per_page));
+      if (args.search) params.append('search', args.search);
+      if (args.parent !== undefined) params.append('parent', String(args.parent));
+      if (args.hide_empty !== undefined) params.append('hide_empty', String(args.hide_empty));
+
+      const categories = await wpReq(`/wc/v3/products/categories?${params}`);
+      return {
+        categories: categories.map(c => ({
+          id: c.id,
+          name: c.name,
+          slug: c.slug,
+          parent: c.parent,
+          description: c.description,
+          count: c.count,
+          image: c.image
+        })),
+        count: categories.length
+      };
+    }
+
+    case 'wc_create_category': {
+      const payload = { name: args.name };
+      if (args.slug) payload.slug = args.slug;
+      if (args.parent) payload.parent = args.parent;
+      if (args.description) payload.description = args.description;
+      if (args.image) payload.image = args.image;
+
+      const category = await wpReq('/wc/v3/products/categories', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      return {
+        success: true,
+        category: {
+          id: category.id,
+          name: category.name,
+          slug: category.slug,
+          parent: category.parent
+        }
+      };
+    }
+
+    case 'wc_update_category': {
+      const payload = {};
+      if (args.name) payload.name = args.name;
+      if (args.slug) payload.slug = args.slug;
+      if (args.parent !== undefined) payload.parent = args.parent;
+      if (args.description) payload.description = args.description;
+      if (args.image) payload.image = args.image;
+
+      const category = await wpReq(`/wc/v3/products/categories/${args.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      return {
+        success: true,
+        category: {
+          id: category.id,
+          name: category.name,
+          slug: category.slug
+        }
+      };
+    }
+
+    case 'wc_delete_category': {
+      const params = args.force !== false ? '?force=true' : '';
+      const result = await wpReq(`/wc/v3/products/categories/${args.id}${params}`, {
+        method: 'DELETE'
+      });
+      return {
+        success: true,
+        deleted: result.id,
+        message: 'Category deleted'
+      };
+    }
+
+    // WOOCOMMERCE VARIATIONS
+    case 'wc_list_variations': {
+      const params = new URLSearchParams();
+      if (args.per_page) params.append('per_page', String(args.per_page));
+
+      const variations = await wpReq(`/wc/v3/products/${args.product_id}/variations?${params}`);
+      return {
+        product_id: args.product_id,
+        variations: variations.map(v => ({
+          id: v.id,
+          sku: v.sku,
+          price: v.price,
+          regular_price: v.regular_price,
+          sale_price: v.sale_price,
+          stock_status: v.stock_status,
+          stock_quantity: v.stock_quantity,
+          attributes: v.attributes,
+          image: v.image
+        })),
+        count: variations.length
+      };
+    }
+
+    case 'wc_create_variation': {
+      const payload = {};
+      if (args.regular_price) payload.regular_price = args.regular_price;
+      if (args.sale_price) payload.sale_price = args.sale_price;
+      if (args.sku) payload.sku = args.sku;
+      if (args.stock_quantity !== undefined) payload.stock_quantity = args.stock_quantity;
+      if (args.stock_status) payload.stock_status = args.stock_status;
+      if (args.attributes) payload.attributes = args.attributes;
+      if (args.image) payload.image = args.image;
+
+      const variation = await wpReq(`/wc/v3/products/${args.product_id}/variations`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      return {
+        success: true,
+        variation: {
+          id: variation.id,
+          sku: variation.sku,
+          price: variation.price,
+          attributes: variation.attributes
+        }
+      };
+    }
+
+    case 'wc_update_variation': {
+      const payload = {};
+      if (args.regular_price) payload.regular_price = args.regular_price;
+      if (args.sale_price !== undefined) payload.sale_price = args.sale_price;
+      if (args.sku) payload.sku = args.sku;
+      if (args.stock_quantity !== undefined) payload.stock_quantity = args.stock_quantity;
+      if (args.stock_status) payload.stock_status = args.stock_status;
+      if (args.image) payload.image = args.image;
+
+      const variation = await wpReq(`/wc/v3/products/${args.product_id}/variations/${args.variation_id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      return {
+        success: true,
+        variation: {
+          id: variation.id,
+          sku: variation.sku,
+          price: variation.price
+        }
+      };
+    }
+
+    case 'wc_delete_variation': {
+      const params = args.force !== false ? '?force=true' : '';
+      const result = await wpReq(`/wc/v3/products/${args.product_id}/variations/${args.variation_id}${params}`, {
+        method: 'DELETE'
+      });
+      return {
+        success: true,
+        deleted: result.id,
+        message: 'Variation deleted'
+      };
+    }
+
+    // WOOCOMMERCE ORDERS
+    case 'wc_list_orders': {
+      const params = new URLSearchParams();
+      if (args.per_page) params.append('per_page', String(args.per_page));
+      if (args.page) params.append('page', String(args.page));
+      if (args.status) params.append('status', args.status);
+      if (args.customer) params.append('customer', String(args.customer));
+      if (args.product) params.append('product', String(args.product));
+      if (args.after) params.append('after', args.after);
+      if (args.before) params.append('before', args.before);
+
+      const orders = await wpReq(`/wc/v3/orders?${params}`);
+      return {
+        orders: orders.map(o => ({
+          id: o.id,
+          number: o.number,
+          status: o.status,
+          total: o.total,
+          currency: o.currency,
+          customer_id: o.customer_id,
+          billing: {
+            first_name: o.billing?.first_name,
+            last_name: o.billing?.last_name,
+            email: o.billing?.email
+          },
+          date_created: o.date_created,
+          line_items_count: o.line_items?.length
+        })),
+        count: orders.length
+      };
+    }
+
+    case 'wc_get_order': {
+      const order = await wpReq(`/wc/v3/orders/${args.id}`);
+      return order;
+    }
+
+    case 'wc_update_order': {
+      const payload = {};
+      if (args.status) payload.status = args.status;
+      if (args.customer_note) payload.customer_note = args.customer_note;
+      if (args.meta_data) payload.meta_data = args.meta_data;
+
+      const order = await wpReq(`/wc/v3/orders/${args.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      return {
+        success: true,
+        order: {
+          id: order.id,
+          number: order.number,
+          status: order.status,
+          total: order.total
+        }
+      };
     }
 
     default:
