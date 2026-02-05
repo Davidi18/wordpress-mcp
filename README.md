@@ -1,15 +1,19 @@
-# WordPress MCP Server v2.4 - Enhanced Edition with SEO Robots Control
+# WordPress MCP Server v2.5 - Enhanced Edition with WooCommerce Support
 
-## 🎉 What's New in v2.4
+## 🎉 What's New in v2.5
 
-**NEW: SEO Robots Control** - Manage index/noindex, follow/nofollow settings for Yoast SEO and Rank Math!
+**NEW: Full WooCommerce Support** - Manage products, categories, variations, and orders!
+
+### v2.5 Features:
+- 🛒 **WooCommerce Products** - Full CRUD for products with images, stock, pricing
+- 📂 **Product Categories** - Create, update, delete product categories
+- 🔀 **Product Variations** - Manage variable products and their variations
+- 📦 **Orders Management** - List, view, and update order status
+- 🖼️ **Product Images** - Add/update product images via URL or media ID
 
 ### v2.4 Features:
-- 🔍 **SEO Robots Control** - Manage search engine indexing settings
-- 🤖 **Auto-Detection** - Automatically detects Yoast SEO or Rank Math
-- ⛔ **noindex/nofollow** - Control page indexing and link following
-- 📦 **noarchive/nosnippet** - Additional options for Rank Math
-- 📋 **Get/Set Tools** - `wp_get_seo_robots`, `wp_set_seo_robots`
+- 🔍 **SEO Robots Control** - Manage index/noindex settings for Yoast/Rank Math
+- 🤖 **Auto-Detection** - Automatically detects active SEO plugin
 
 ### v2.3 Features:
 - 🔌 **Plugin Management** - Complete CRUD for WordPress plugins
@@ -136,9 +140,33 @@
 - **`wp_update_plugin`** - Update to latest version
 - **`wp_bootstrap_plugin_installer`** - Setup ZIP installer API
 
-### SEO Robots (2 endpoints) ✨ NEW in v2.4!
+### SEO Robots (2 endpoints) ✨ v2.4
 - **`wp_get_seo_robots`** - Get indexing settings (noindex, nofollow, etc.)
 - **`wp_set_seo_robots`** - Set indexing settings for Yoast SEO or Rank Math
+
+### WooCommerce Products (5 endpoints) ✨ NEW in v2.5!
+- **`wc_list_products`** - List products with filters (category, status, SKU, on_sale)
+- **`wc_get_product`** - Get single product with full details
+- **`wc_create_product`** - Create new product with images, pricing, stock
+- **`wc_update_product`** - Update product details, images, pricing
+- **`wc_delete_product`** - Delete or trash a product
+
+### WooCommerce Categories (4 endpoints) ✨ NEW in v2.5!
+- **`wc_list_categories`** - List product categories
+- **`wc_create_category`** - Create new category with image
+- **`wc_update_category`** - Update category details
+- **`wc_delete_category`** - Delete a category
+
+### WooCommerce Variations (4 endpoints) ✨ NEW in v2.5!
+- **`wc_list_variations`** - List variations for a variable product
+- **`wc_create_variation`** - Create new variation with attributes
+- **`wc_update_variation`** - Update variation price, stock, image
+- **`wc_delete_variation`** - Delete a variation
+
+### WooCommerce Orders (3 endpoints) ✨ NEW in v2.5!
+- **`wc_list_orders`** - List orders with filters (status, customer, date)
+- **`wc_get_order`** - Get full order details
+- **`wc_update_order`** - Update order status
 
 ---
 
@@ -380,6 +408,132 @@ Control how search engines index your content. Works with **Yoast SEO** or **Ran
 
 ---
 
+### WooCommerce (NEW in v2.5!)
+
+Full WooCommerce support for managing products, categories, variations, and orders.
+
+#### List Products
+```javascript
+{
+  "tool": "wc_list_products",
+  "args": {
+    "per_page": 20,
+    "status": "publish",
+    "on_sale": true
+  }
+}
+```
+
+#### Create Product
+```javascript
+{
+  "tool": "wc_create_product",
+  "args": {
+    "name": "Premium T-Shirt",
+    "type": "simple",
+    "regular_price": "29.99",
+    "sale_price": "24.99",
+    "description": "High-quality cotton t-shirt",
+    "short_description": "Premium cotton tee",
+    "sku": "TSHIRT-001",
+    "manage_stock": true,
+    "stock_quantity": 100,
+    "categories": [{"id": 15}],
+    "images": [
+      {"src": "https://example.com/image.jpg"}
+    ]
+  }
+}
+```
+
+#### Update Product Stock
+```javascript
+{
+  "tool": "wc_update_product",
+  "args": {
+    "id": 123,
+    "stock_quantity": 50,
+    "stock_status": "instock"
+  }
+}
+```
+
+#### Update Product Images
+```javascript
+{
+  "tool": "wc_update_product",
+  "args": {
+    "id": 123,
+    "images": [
+      {"src": "https://example.com/new-image.jpg"},
+      {"id": 456}  // Existing media ID
+    ]
+  }
+}
+```
+
+#### Create Variable Product with Variations
+```javascript
+// Step 1: Create variable product with attributes
+{
+  "tool": "wc_create_product",
+  "args": {
+    "name": "Variable T-Shirt",
+    "type": "variable",
+    "attributes": [
+      {
+        "name": "Color",
+        "options": ["Red", "Blue", "Green"],
+        "variation": true
+      },
+      {
+        "name": "Size",
+        "options": ["S", "M", "L"],
+        "variation": true
+      }
+    ]
+  }
+}
+
+// Step 2: Create variation
+{
+  "tool": "wc_create_variation",
+  "args": {
+    "product_id": 123,
+    "regular_price": "29.99",
+    "attributes": [
+      {"name": "Color", "option": "Red"},
+      {"name": "Size", "option": "M"}
+    ],
+    "stock_quantity": 25
+  }
+}
+```
+
+#### List Orders by Status
+```javascript
+{
+  "tool": "wc_list_orders",
+  "args": {
+    "status": "processing",
+    "per_page": 50
+  }
+}
+```
+
+#### Update Order Status
+```javascript
+{
+  "tool": "wc_update_order",
+  "args": {
+    "id": 789,
+    "status": "completed"
+  }
+}
+```
+
+---
+
 ### Get Special Pages (Homepage, Blog, Privacy Policy)
 ```javascript
 {
@@ -399,7 +553,7 @@ Control how search engines index your content. Works with **Yoast SEO** or **Ran
 
 ## 📈 API Coverage Statistics
 
-| Content Type | Before v2.0 | After v2.4 | Coverage |
+| Content Type | Before v2.0 | After v2.5 | Coverage |
 |--------------|-------------|------------|----------|
 | Posts | 5 endpoints | 5 endpoints | 100% ✅ |
 | Pages | 5 endpoints | 5 endpoints | 100% ✅ |
@@ -409,9 +563,10 @@ Control how search engines index your content. Works with **Yoast SEO** or **Ran
 | Taxonomy | 2 endpoints | 6 endpoints | 100% ✨ |
 | Custom Posts | 3 endpoints | 3 endpoints | 100% ✅ |
 | Site Info | 0 endpoints | 3 endpoints | 100% ✨ |
-| Plugins | 0 endpoints | 8 endpoints | NEW ✨ |
-| **SEO Robots** | 0 endpoints | **2 endpoints** | **NEW ✨** |
-| **TOTAL** | **18 endpoints** | **46 endpoints** | **156% more!** |
+| Plugins | 0 endpoints | 8 endpoints | ✨ |
+| SEO Robots | 0 endpoints | 2 endpoints | ✨ |
+| **WooCommerce** | 0 endpoints | **16 endpoints** | **NEW ✨** |
+| **TOTAL** | **18 endpoints** | **62 endpoints** | **244% more!** |
 
 ---
 
@@ -940,7 +1095,36 @@ npm start
 
 ## 📝 Changelog
 
-### v2.4.0 (Latest)
+### v2.5.0 (Latest)
+
+#### Added
+- 🛒 **WooCommerce Support** - Full product management via MCP
+  - `wc_list_products` - List products with filters (category, status, SKU, on_sale, featured)
+  - `wc_get_product` - Get single product with all details
+  - `wc_create_product` - Create products with images, pricing, stock, attributes
+  - `wc_update_product` - Update any product field including images
+  - `wc_delete_product` - Delete or trash products
+- 📂 **Product Categories**
+  - `wc_list_categories` - List product categories
+  - `wc_create_category` - Create category with image
+  - `wc_update_category` - Update category details
+  - `wc_delete_category` - Delete categories
+- 🔀 **Product Variations** (for variable products)
+  - `wc_list_variations` - List all variations for a product
+  - `wc_create_variation` - Create variation with attributes
+  - `wc_update_variation` - Update variation price, stock, image
+  - `wc_delete_variation` - Delete variations
+- 📦 **Orders Management**
+  - `wc_list_orders` - List orders with status/date filters
+  - `wc_get_order` - Get full order details
+  - `wc_update_order` - Update order status
+
+#### Improved
+- Total MCP tools increased from 46 to **62 endpoints** (244% increase from v1.0!)
+
+---
+
+### v2.4.0
 
 #### Added
 - 🔍 **SEO Robots Control** - Manage search engine indexing settings for posts and pages
