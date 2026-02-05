@@ -1,8 +1,15 @@
-# WordPress MCP Server v2.3 - Enhanced Edition with Plugin Management
+# WordPress MCP Server v2.4 - Enhanced Edition with SEO Robots Control
 
-## 🎉 What's New in v2.3
+## 🎉 What's New in v2.4
 
-**NEW: Full Plugin Management** - Install, activate, deactivate, update, and delete WordPress plugins directly via MCP!
+**NEW: SEO Robots Control** - Manage index/noindex, follow/nofollow settings for Yoast SEO and Rank Math!
+
+### v2.4 Features:
+- 🔍 **SEO Robots Control** - Manage search engine indexing settings
+- 🤖 **Auto-Detection** - Automatically detects Yoast SEO or Rank Math
+- ⛔ **noindex/nofollow** - Control page indexing and link following
+- 📦 **noarchive/nosnippet** - Additional options for Rank Math
+- 📋 **Get/Set Tools** - `wp_get_seo_robots`, `wp_set_seo_robots`
 
 ### v2.3 Features:
 - 🔌 **Plugin Management** - Complete CRUD for WordPress plugins
@@ -128,6 +135,10 @@
 - **`wp_delete_plugin`** - Delete a plugin (must be deactivated)
 - **`wp_update_plugin`** - Update to latest version
 - **`wp_bootstrap_plugin_installer`** - Setup ZIP installer API
+
+### SEO Robots (2 endpoints) ✨ NEW in v2.4!
+- **`wp_get_seo_robots`** - Get indexing settings (noindex, nofollow, etc.)
+- **`wp_set_seo_robots`** - Set indexing settings for Yoast SEO or Rank Math
 
 ---
 
@@ -298,6 +309,77 @@
 }
 ```
 
+### SEO Robots Control (NEW in v2.4!)
+
+Control how search engines index your content. Works with **Yoast SEO** or **Rank Math**.
+
+#### Get Current SEO Settings
+```javascript
+{
+  "tool": "wp_get_seo_robots",
+  "args": { "id": 42 }
+}
+// Returns:
+// {
+//   "post_id": 42,
+//   "seo_plugin": "yoast",  // or "rankmath"
+//   "robots": {
+//     "noindex": false,
+//     "nofollow": false,
+//     "noarchive": false,
+//     "nosnippet": false
+//   }
+// }
+```
+
+#### Set Page to NoIndex (Hide from Search Engines)
+```javascript
+{
+  "tool": "wp_set_seo_robots",
+  "args": {
+    "id": 42,
+    "noindex": true
+  }
+}
+```
+
+#### Set Multiple Robot Directives
+```javascript
+{
+  "tool": "wp_set_seo_robots",
+  "args": {
+    "id": 42,
+    "noindex": true,
+    "nofollow": true,
+    "noarchive": true,   // Rank Math only
+    "nosnippet": true    // Rank Math only
+  }
+}
+```
+
+#### Reset to Index (Allow Indexing)
+```javascript
+{
+  "tool": "wp_set_seo_robots",
+  "args": {
+    "id": 42,
+    "noindex": false,
+    "nofollow": false
+  }
+}
+```
+
+**Supported Options:**
+
+| Option | Yoast SEO | Rank Math | Description |
+|--------|-----------|-----------|-------------|
+| `noindex` | ✅ | ✅ | Prevent search engine indexing |
+| `nofollow` | ✅ | ✅ | Prevent following links on page |
+| `noarchive` | ❌ | ✅ | Prevent cached version |
+| `nosnippet` | ❌ | ✅ | Prevent search snippets |
+
+---
+
 ### Get Special Pages (Homepage, Blog, Privacy Policy)
 ```javascript
 {
@@ -317,7 +399,7 @@
 
 ## 📈 API Coverage Statistics
 
-| Content Type | Before v2.0 | After v2.3 | Coverage |
+| Content Type | Before v2.0 | After v2.4 | Coverage |
 |--------------|-------------|------------|----------|
 | Posts | 5 endpoints | 5 endpoints | 100% ✅ |
 | Pages | 5 endpoints | 5 endpoints | 100% ✅ |
@@ -327,8 +409,9 @@
 | Taxonomy | 2 endpoints | 6 endpoints | 100% ✨ |
 | Custom Posts | 3 endpoints | 3 endpoints | 100% ✅ |
 | Site Info | 0 endpoints | 3 endpoints | 100% ✨ |
-| **Plugins** | 0 endpoints | **8 endpoints** | **NEW ✨** |
-| **TOTAL** | **18 endpoints** | **44 endpoints** | **144% more!** |
+| Plugins | 0 endpoints | 8 endpoints | NEW ✨ |
+| **SEO Robots** | 0 endpoints | **2 endpoints** | **NEW ✨** |
+| **TOTAL** | **18 endpoints** | **46 endpoints** | **156% more!** |
 
 ---
 
@@ -857,7 +940,23 @@ npm start
 
 ## 📝 Changelog
 
-### v2.3.0 (Latest)
+### v2.4.0 (Latest)
+
+#### Added
+- 🔍 **SEO Robots Control** - Manage search engine indexing settings for posts and pages
+  - `wp_get_seo_robots` - Get current robots settings (noindex, nofollow, etc.)
+  - `wp_set_seo_robots` - Set robots directives for any post/page
+  - Automatic SEO plugin detection (Yoast SEO or Rank Math)
+  - Support for noindex, nofollow (both plugins)
+  - Support for noarchive, nosnippet (Rank Math only)
+
+#### Improved
+- Total MCP tools increased from 44 to **46 endpoints**
+- Strudel Schema plugin now includes SEO robots REST endpoints
+
+---
+
+### v2.3.0
 
 #### Added
 - 🔌 **Plugin Management** - Complete plugin lifecycle management via MCP
