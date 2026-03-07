@@ -73,6 +73,7 @@ async function loadClientsFromDB() {
         AND wordpress_username IS NOT NULL
         AND wordpress_app_password IS NOT NULL
         AND (deleted_at IS NULL)
+        AND (is_wordpress_paused IS NULL OR is_wordpress_paused = false)
       ORDER BY name
     `);
     
@@ -113,7 +114,33 @@ async function getClientConfig(clientId = null) {
   const dbClients = await loadClientsFromDB();
   
   if (dbClients && dbClients.length > 0) {
-    // ... existing database code stays the same ...
+    let client;
+    if (!clientId || clientId === 'default') {
+      client = dbClients[0];
+    } else {
+      client = dbClients.find(c =>
+        (c.wordpress_client_id && c.wordpress_client_id === clientId) ||
+        c.name.toLowerCase().replace(/\s+/g, '-') === clientId
+      );
+    }
+    if (client) {
+      let wpUrl = client.wordpress_url.replace(/\/+$/, '');
+      if (!wpUrl.startsWith('http://') && !wpUrl.startsWith('https://')) {
+        wpUrl = 'https://' + wpUrl;
+      }
+      return {
+        url: wpUrl,
+        username: client.wordpress_username,
+        password: client.wordpress_app_password,
+        name: client.name,
+        source: 'database'
+      };
+    }
+    // If clientId specified but not found in DB, throw error with available clients
+    if (clientId && clientId !== 'default') {
+      const available = dbClients.map(c => c.wordpress_client_id || c.name).join(', ');
+      throw new Error(`Client not found: "${clientId}". Available: [${available}]`);
+    }
   }
   
   // Fallback to ENV configuration
