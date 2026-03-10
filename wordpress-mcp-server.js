@@ -118,10 +118,22 @@ async function getClientConfig(clientId = null) {
     if (!clientId || clientId === 'default') {
       client = dbClients[0];
     } else {
-      client = dbClients.find(c =>
-        (c.wordpress_client_id && c.wordpress_client_id === clientId) ||
-        c.name.toLowerCase().replace(/\s+/g, '-') === clientId
-      );
+      // Match by: wordpress_client_id, name slug, or domain from wordpress_url
+      const searchId = clientId.toLowerCase();
+      client = dbClients.find(c => {
+        // Match by wordpress_client_id
+        if (c.wordpress_client_id && c.wordpress_client_id === searchId) return true;
+        // Match by name slug (e.g. "shukeat", "kedma-solar")
+        if (c.name.toLowerCase().replace(/\s+/g, '-') === searchId) return true;
+        // Match by domain extracted from wordpress_url (e.g. "shukeat.co.il")
+        if (c.wordpress_url) {
+          const domain = extractDomain(c.wordpress_url);
+          if (domain === searchId) return true;
+          // Also match domain slug (e.g. "shukeat-co-il")
+          if (domain.replace(/\./g, '-') === searchId) return true;
+        }
+        return false;
+      });
     }
     if (client) {
       let wpUrl = client.wordpress_url.replace(/\/+$/, '');
@@ -138,7 +150,7 @@ async function getClientConfig(clientId = null) {
     }
     // If clientId specified but not found in DB, throw error with available clients
     if (clientId && clientId !== 'default') {
-      const available = dbClients.map(c => c.wordpress_client_id || c.name).join(', ');
+      const available = dbClients.map(c => c.wordpress_client_id || extractDomain(c.wordpress_url) || c.name).join(', ');
       throw new Error(`Client not found: "${clientId}". Available: [${available}]`);
     }
   }
