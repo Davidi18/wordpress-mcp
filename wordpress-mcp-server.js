@@ -3474,6 +3474,13 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Acknowledge notifications silently (no response needed per MCP spec)
+    if (method && method.startsWith('notifications/')) {
+      res.writeHead(202);
+      res.end();
+      return;
+    }
+
     if (method === 'initialize') {
       return sendResult(JSON.stringify({
         jsonrpc: '2.0',
