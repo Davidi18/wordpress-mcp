@@ -3396,16 +3396,33 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // SSE transport (GET /mcp) — for mcporter and MCP clients
+  if (req.method === 'GET' && req.url === '/mcp') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*'
+    });
+    // Send endpoint event so client knows where to POST
+    res.write(`event: endpoint\ndata: /mcp\n\n`);
+    // Keep alive ping every 15s
+    const keepAlive = setInterval(() => res.write(': ping\n\n'), 15000);
+    req.on('close', () => clearInterval(keepAlive));
+    return;
+  }
+
   // Handle POST /mcp endpoint (MCP protocol)
   if (req.method !== 'POST' || req.url !== '/mcp') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ 
+    return res.end(JSON.stringify({
       error: 'Not found',
       endpoints: [
         'GET /health',
         'GET /api/clients',
         'GET /api/find?slug=...&client=...',
         'GET /api/site-data?client=...',
+        'GET /mcp (SSE)',
         'POST /mcp'
       ]
     }));
