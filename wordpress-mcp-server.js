@@ -3479,7 +3479,7 @@ const server = http.createServer(async (req, res) => {
         jsonrpc: '2.0',
         id,
         result: {
-          protocolVersion: '2025-03-01',
+          protocolVersion: params?.protocolVersion || '2024-11-05',
           capabilities: { tools: {} },
           serverInfo: {
             name: 'WordPress MCP Server',
