@@ -13,6 +13,9 @@ const API_KEY = process.env.API_KEY;
 // PostgreSQL Configuration (Agency OS via Tailscale)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:password@100.98.146.89:5432/postgres';
 
+// Session management
+const sseSessions = new Map(); // sessionId → res
+
 // Client cache (refreshes every 5 minutes)
 let clientCache = null;
 let clientCacheTime = 0;
@@ -3398,17 +3401,23 @@ const server = http.createServer(async (req, res) => {
 
   // SSE transport (GET /mcp) — for mcporter and MCP clients
   if (req.method === 'GET' && req.url === '/mcp') {
+    const sessionId = Math.random().toString(36).slice(2);
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
+      'Mcp-Session-Id': sessionId,
       'Access-Control-Allow-Origin': '*'
     });
     // Send endpoint event so client knows where to POST
     res.write(`event: endpoint\ndata: /mcp\n\n`);
+    sseSessions.set(sessionId, res);
     // Keep alive ping every 15s
     const keepAlive = setInterval(() => res.write(': ping\n\n'), 15000);
-    req.on('close', () => clearInterval(keepAlive));
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      sseSessions.delete(sessionId);
+    });
     return;
   }
 
@@ -3435,9 +3444,24 @@ const server = http.createServer(async (req, res) => {
 
     const { method, params, id } = body;
 
+    // Look up SSE session for streaming responses
+    const sessionId = req.headers['mcp-session-id'];
+    const sseRes = sessionId ? sseSessions.get(sessionId) : null;
+
+    // Helper: send JSON-RPC result via SSE or direct response
+    function sendResult(jsonResult) {
+      if (sseRes) {
+        sseRes.write(`data: ${jsonResult}\n\n`);
+        res.writeHead(202);
+        res.end();
+      } else {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(jsonResult);
+      }
+    }
+
     if (method === 'initialize') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({
+      return sendResult(JSON.stringify({
         jsonrpc: '2.0',
         id,
         result: {
@@ -3453,8 +3477,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (method === 'tools/list') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({
+      return sendResult(JSON.stringify({
         jsonrpc: '2.0',
         id,
         result: { tools }
@@ -3463,12 +3486,12 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'tools/call') {
       const { name, arguments: args } = params;
-    
+
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('🪵 TOOL CALL:', name);
       console.log('📦 ARGS:', JSON.stringify(args, null, 2));
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    
+
       // Handle client parameter for multi-site
       let clientConfig = null;
       if (args && args.client) {
@@ -3481,7 +3504,7 @@ const server = http.createServer(async (req, res) => {
         Object.assign(args, args.arguments);
         delete args.arguments;
       }
-    
+
       // Normalize ID fields
       if (args && typeof args === 'object') {
         if (args.id && !args.ID) args.ID = String(args.id);
@@ -3489,11 +3512,10 @@ const server = http.createServer(async (req, res) => {
         if (args.postType && !args.post_type) args.post_type = args.postType;
         if (args.type && !args.post_type) args.post_type = args.type;
       }
-    
+
       const result = await executeTool(name, args || {}, clientConfig);
 
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({
+      return sendResult(JSON.stringify({
         jsonrpc: '2.0',
         id,
         result: {
