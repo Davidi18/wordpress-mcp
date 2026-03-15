@@ -3244,6 +3244,9 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
 }
 
 // HTTP Server
+// Session map for SSE transport
+const sseSessions = new Map();
+
 const server = http.createServer(async (req, res) => {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -3398,15 +3401,21 @@ const server = http.createServer(async (req, res) => {
 
   // GET /mcp — SSE fallback (mcporter uses this as fallback transport)
   if (req.method === 'GET' && req.url === '/mcp') {
+    const sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': '*',
+      'Mcp-Session-Id': sessionId
     });
     res.write(`event: endpoint\ndata: /mcp\n\n`);
+    sseSessions.set(sessionId, res);
     const keepAlive = setInterval(() => res.write(': ping\n\n'), 15000);
-    req.on('close', () => clearInterval(keepAlive));
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      sseSessions.delete(sessionId);
+    });
     return;
   }
 
@@ -3434,10 +3443,17 @@ const server = http.createServer(async (req, res) => {
     const { method, params, id } = body;
 
     const acceptsSSE = (req.headers['accept'] || '').includes('text/event-stream');
+    const mcpSessionId = req.headers['mcp-session-id'];
+    const sseStream = mcpSessionId ? sseSessions.get(mcpSessionId) : null;
 
     // Helper: send JSON-RPC result via SSE stream or direct JSON response
     function sendResult(jsonResult) {
-      if (acceptsSSE) {
+      if (sseStream) {
+        // SSE session mode — push to open SSE stream, return 202
+        sseStream.write(`data: ${jsonResult}\n\n`);
+        res.writeHead(202);
+        res.end();
+      } else if (acceptsSSE) {
         // StreamableHTTP mode — SSE as direct response
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
