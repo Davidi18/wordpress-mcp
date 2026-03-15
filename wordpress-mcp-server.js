@@ -3396,6 +3396,20 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // GET /mcp — SSE fallback (mcporter uses this as fallback transport)
+  if (req.method === 'GET' && req.url === '/mcp') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.write(`event: endpoint\ndata: /mcp\n\n`);
+    const keepAlive = setInterval(() => res.write(': ping\n\n'), 15000);
+    req.on('close', () => clearInterval(keepAlive));
+    return;
+  }
+
   // Handle POST /mcp endpoint (MCP protocol)
   if (req.method !== 'POST' || req.url !== '/mcp') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -3406,6 +3420,7 @@ const server = http.createServer(async (req, res) => {
         'GET /api/clients',
         'GET /api/find?slug=...&client=...',
         'GET /api/site-data?client=...',
+        'GET /mcp (SSE fallback)',
         'POST /mcp'
       ]
     }));
