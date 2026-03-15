@@ -3515,7 +3515,6 @@ const server = http.createServer(async (req, res) => {
 
       // Handle client parameter for multi-site
       let clientConfig = null;
-      console.log('🔍 PRE-CONVERT args type:', typeof args, 'keys:', args ? Object.keys(args) : 'null');
       // Support site_url as alias for client (e.g. site_url:"https://caio.co.il" → client:"caio-co-il")
       if (args && args.site_url && !args.client) {
         const domain = args.site_url.replace(/^https?:\/\//, '').replace(/\/$/, '');
@@ -3523,9 +3522,7 @@ const server = http.createServer(async (req, res) => {
         delete args.site_url;
       }
       if (args && args.client) {
-        console.log('🔍 Looking up client:', args.client);
         clientConfig = await getClientConfig(args.client);
-        console.log('🔍 clientConfig found:', clientConfig ? clientConfig.url : 'NULL');
         delete args.client; // Remove from args after extracting
       }
 
