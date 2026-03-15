@@ -13,9 +13,6 @@ const API_KEY = process.env.API_KEY;
 // PostgreSQL Configuration (Agency OS via Tailscale)
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:password@100.98.146.89:5432/postgres';
 
-// Session management
-const sseSessions = new Map(); // sessionId → res
-
 // Client cache (refreshes every 5 minutes)
 let clientCache = null;
 let clientCacheTime = 0;
@@ -3399,28 +3396,6 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // SSE transport (GET /mcp) — for mcporter and MCP clients
-  if (req.method === 'GET' && req.url === '/mcp') {
-    const sessionId = Math.random().toString(36).slice(2);
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'Mcp-Session-Id': sessionId,
-      'Access-Control-Allow-Origin': '*'
-    });
-    // Send endpoint event so client knows where to POST
-    res.write(`event: endpoint\ndata: /mcp\n\n`);
-    sseSessions.set(sessionId, res);
-    // Keep alive ping every 15s
-    const keepAlive = setInterval(() => res.write(': ping\n\n'), 15000);
-    req.on('close', () => {
-      clearInterval(keepAlive);
-      sseSessions.delete(sessionId);
-    });
-    return;
-  }
-
   // Handle POST /mcp endpoint (MCP protocol)
   if (req.method !== 'POST' || req.url !== '/mcp') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -3431,7 +3406,6 @@ const server = http.createServer(async (req, res) => {
         'GET /api/clients',
         'GET /api/find?slug=...&client=...',
         'GET /api/site-data?client=...',
-        'GET /mcp (SSE)',
         'POST /mcp'
       ]
     }));
@@ -3444,17 +3418,21 @@ const server = http.createServer(async (req, res) => {
 
     const { method, params, id } = body;
 
-    // Look up SSE session for streaming responses
-    const sessionId = req.headers['mcp-session-id'];
-    const sseRes = sessionId ? sseSessions.get(sessionId) : null;
+    const acceptsSSE = (req.headers['accept'] || '').includes('text/event-stream');
 
-    // Helper: send JSON-RPC result via SSE or direct response
+    // Helper: send JSON-RPC result via SSE stream or direct JSON response
     function sendResult(jsonResult) {
-      if (sseRes) {
-        sseRes.write(`data: ${jsonResult}\n\n`);
-        res.writeHead(202);
+      if (acceptsSSE) {
+        // StreamableHTTP mode — SSE as direct response
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive'
+        });
+        res.write(`data: ${jsonResult}\n\n`);
         res.end();
       } else {
+        // Direct JSON mode (fallback)
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(jsonResult);
       }
