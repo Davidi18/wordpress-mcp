@@ -3244,8 +3244,9 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
 }
 
 // HTTP Server
-// Session map for SSE transport
+// Session map for SSE transport (by sessionId and by remoteAddress as fallback)
 const sseSessions = new Map();
+const sseByIp = new Map();
 
 const server = http.createServer(async (req, res) => {
   // CORS headers
@@ -3411,10 +3412,13 @@ const server = http.createServer(async (req, res) => {
     });
     res.write(`event: endpoint\ndata: /mcp\n\n`);
     sseSessions.set(sessionId, res);
+    const remoteIp = req.socket.remoteAddress;
+    sseByIp.set(remoteIp, res);
     const keepAlive = setInterval(() => res.write(': ping\n\n'), 15000);
     req.on('close', () => {
       clearInterval(keepAlive);
       sseSessions.delete(sessionId);
+      if (sseByIp.get(remoteIp) === res) sseByIp.delete(remoteIp);
     });
     return;
   }
@@ -3444,7 +3448,8 @@ const server = http.createServer(async (req, res) => {
 
     const acceptsSSE = (req.headers['accept'] || '').includes('text/event-stream');
     const mcpSessionId = req.headers['mcp-session-id'];
-    const sseStream = mcpSessionId ? sseSessions.get(mcpSessionId) : null;
+    const remoteIp = req.socket.remoteAddress;
+    const sseStream = (mcpSessionId && sseSessions.get(mcpSessionId)) || sseByIp.get(remoteIp) || null;
 
     // Helper: send JSON-RPC result via SSE stream or direct JSON response
     function sendResult(jsonResult) {
