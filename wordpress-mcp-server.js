@@ -1618,6 +1618,38 @@ const tools = [
       required: ['url']
     }
   },
+  {
+    name: 'wp_yoast_update_meta',
+    description: 'Update Yoast SEO meta (title, description, focus keyword, robots) for a post/page. Works on sites with Yoast (smartup, xod).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Post/page ID', required: true },
+        post_type: { type: 'string', description: 'post or page', default: 'post' },
+        title: { type: 'string', description: 'SEO title' },
+        description: { type: 'string', description: 'Meta description' },
+        focus_keyword: { type: 'string', description: 'Focus keyphrase' },
+        robots_noindex: { type: 'boolean', description: 'Set noindex (true = noindex)' },
+        robots_nofollow: { type: 'boolean', description: 'Set nofollow (true = nofollow)' },
+        canonical: { type: 'string', description: 'Canonical URL override' },
+        og_title: { type: 'string', description: 'Open Graph title' },
+        og_description: { type: 'string', description: 'Open Graph description' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_yoast_get_meta',
+    description: 'Get Yoast SEO meta fields (title, description, focus keyword, robots, canonical) for a specific post/page by ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Post/page ID', required: true },
+        post_type: { type: 'string', description: 'post or page', default: 'post' }
+      },
+      required: ['id']
+    }
+  },
 
   // ── SETTINGS ──
   {
@@ -2334,6 +2366,43 @@ async function executeTool(name, args, clientConfig = null) {
         status: yoastData?.status || 200,
         json: yoastData?.json || {},
         html: (yoastData?.html || '').substring(0, 2000)
+      };
+    }
+
+    case 'wp_yoast_update_meta': {
+      const yMeta = {};
+      if (args.title !== undefined) yMeta._yoast_wpseo_title = args.title;
+      if (args.description !== undefined) yMeta._yoast_wpseo_metadesc = args.description;
+      if (args.focus_keyword !== undefined) yMeta._yoast_wpseo_focuskw = args.focus_keyword;
+      if (args.robots_noindex !== undefined) yMeta._yoast_wpseo_meta_robots_noindex = args.robots_noindex ? '1' : '0';
+      if (args.robots_nofollow !== undefined) yMeta._yoast_wpseo_meta_robots_nofollow = args.robots_nofollow ? '1' : '0';
+      if (args.canonical !== undefined) yMeta._yoast_wpseo_canonical = args.canonical;
+      if (args.og_title !== undefined) yMeta._yoast_wpseo_opengraph_title = args.og_title;
+      if (args.og_description !== undefined) yMeta._yoast_wpseo_opengraph_description = args.og_description;
+      const yEndpoint = args.post_type === 'page' ? 'pages' : 'posts';
+      await wpReq(`/wp/v2/${yEndpoint}/${args.id}`, {
+        method: 'POST',
+        body: { meta: yMeta }
+      });
+      return { updated: true, id: args.id, fields: Object.keys(yMeta) };
+    }
+
+    case 'wp_yoast_get_meta': {
+      const yEndpoint2 = args.post_type === 'page' ? 'pages' : 'posts';
+      const yPost = await wpReq(`/wp/v2/${yEndpoint2}/${args.id}?context=edit`);
+      const yM = yPost?.meta || {};
+      return {
+        id: args.id,
+        title: yM._yoast_wpseo_title || '',
+        description: yM._yoast_wpseo_metadesc || '',
+        focus_keyword: yM._yoast_wpseo_focuskw || '',
+        robots_noindex: yM._yoast_wpseo_meta_robots_noindex === '1',
+        robots_nofollow: yM._yoast_wpseo_meta_robots_nofollow === '1',
+        canonical: yM._yoast_wpseo_canonical || '',
+        og_title: yM._yoast_wpseo_opengraph_title || '',
+        og_description: yM._yoast_wpseo_opengraph_description || '',
+        schema_page_type: yM._yoast_wpseo_schema_page_type || '',
+        schema_article_type: yM._yoast_wpseo_schema_article_type || ''
       };
     }
 
