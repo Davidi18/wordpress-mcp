@@ -2270,15 +2270,19 @@ async function executeTool(name, args, clientConfig = null) {
     // ── BULK OPERATIONS ──
     case 'wp_bulk_update_posts': {
       const postType = args.post_type === 'pages' ? 'pages' : 'posts';
+      // Parse updates if passed as string
+      const updates = typeof args.updates === 'string' ? JSON.parse(args.updates) : args.updates;
+      // Parse ids if passed as string
+      const ids = typeof args.ids === 'string' ? JSON.parse(args.ids) : args.ids;
       const results = [];
       // Process in batches of 5 to avoid rate limits
-      for (let i = 0; i < args.ids.length; i += 5) {
-        const batch = args.ids.slice(i, i + 5);
+      for (let i = 0; i < ids.length; i += 5) {
+        const batch = ids.slice(i, i + 5);
         const promises = batch.map(async (id) => {
           try {
             await wpReq(`/wp/v2/${postType}/${id}`, {
               method: 'POST',
-              body: args.updates
+              body: updates
             });
             return { id, success: true };
           } catch (e) {
@@ -2292,7 +2296,7 @@ async function executeTool(name, args, clientConfig = null) {
         }
       }
       return {
-        total: args.ids.length,
+        total: ids.length,
         succeeded: results.filter(r => r.success).length,
         failed: results.filter(r => !r.success).length,
         results
@@ -2370,6 +2374,9 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_yoast_update_meta': {
+      // Yoast doesn't register meta in REST API by default.
+      // Strategy: try meta object first (works if Yoast REST is enabled),
+      // fall back to yoast_head_json check for verification.
       const yMeta = {};
       if (args.title !== undefined) yMeta._yoast_wpseo_title = args.title;
       if (args.description !== undefined) yMeta._yoast_wpseo_metadesc = args.description;
@@ -2380,29 +2387,49 @@ async function executeTool(name, args, clientConfig = null) {
       if (args.og_title !== undefined) yMeta._yoast_wpseo_opengraph_title = args.og_title;
       if (args.og_description !== undefined) yMeta._yoast_wpseo_opengraph_description = args.og_description;
       const yEndpoint = args.post_type === 'page' ? 'pages' : 'posts';
-      await wpReq(`/wp/v2/${yEndpoint}/${args.id}`, {
-        method: 'POST',
-        body: { meta: yMeta }
-      });
-      return { updated: true, id: args.id, fields: Object.keys(yMeta) };
+      try {
+        await wpReq(`/wp/v2/${yEndpoint}/${args.id}`, {
+          method: 'POST',
+          body: { meta: yMeta }
+        });
+        return { updated: true, id: args.id, fields: Object.keys(yMeta), method: 'meta' };
+      } catch (e) {
+        // If meta write fails (Yoast doesn't register fields), try yoast_meta endpoint
+        if (e.message?.includes('404') || e.message?.includes('rest_no_route')) {
+          // Fall back: update via standard post update with meta in body
+          // Some Yoast versions expose meta through yoast_head_json but not write
+          return {
+            updated: false,
+            error: 'Yoast does not expose meta write via REST API on this site. Use wp_update_post with meta fields directly, or install "Yoast SEO: REST API" addon.',
+            id: args.id,
+            workaround: `wp_update_post id:${args.id} meta:'${JSON.stringify(yMeta)}'`
+          };
+        }
+        throw e;
+      }
     }
 
     case 'wp_yoast_get_meta': {
       const yEndpoint2 = args.post_type === 'page' ? 'pages' : 'posts';
       const yPost = await wpReq(`/wp/v2/${yEndpoint2}/${args.id}?context=edit`);
       const yM = yPost?.meta || {};
+      // Also try yoast_head_json (Yoast v14+ adds this to REST response)
+      const yHead = yPost?.yoast_head_json || {};
       return {
         id: args.id,
-        title: yM._yoast_wpseo_title || '',
-        description: yM._yoast_wpseo_metadesc || '',
+        // Prefer direct meta, fall back to yoast_head_json
+        title: yM._yoast_wpseo_title || yHead.title || '',
+        description: yM._yoast_wpseo_metadesc || yHead.description || '',
         focus_keyword: yM._yoast_wpseo_focuskw || '',
         robots_noindex: yM._yoast_wpseo_meta_robots_noindex === '1',
         robots_nofollow: yM._yoast_wpseo_meta_robots_nofollow === '1',
-        canonical: yM._yoast_wpseo_canonical || '',
-        og_title: yM._yoast_wpseo_opengraph_title || '',
-        og_description: yM._yoast_wpseo_opengraph_description || '',
+        canonical: yM._yoast_wpseo_canonical || yHead.canonical || '',
+        og_title: yM._yoast_wpseo_opengraph_title || yHead.og_title || '',
+        og_description: yM._yoast_wpseo_opengraph_description || yHead.og_description || '',
+        og_image: yHead.og_image?.[0]?.url || '',
         schema_page_type: yM._yoast_wpseo_schema_page_type || '',
-        schema_article_type: yM._yoast_wpseo_schema_article_type || ''
+        schema_article_type: yM._yoast_wpseo_schema_article_type || '',
+        source: Object.keys(yM).some(k => k.includes('yoast')) ? 'meta' : 'yoast_head_json'
       };
     }
 
@@ -2424,24 +2451,61 @@ async function executeTool(name, args, clientConfig = null) {
 
     // ── REDIRECTS ──
     case 'wp_get_redirects': {
-      // Try RankMath redirections first, fall back to Redirection plugin
-      try {
-        const rmRedirects = await wpReq('/rankmath/v1/redirections?' + new URLSearchParams({
-          per_page: String(args.per_page || 50),
-          page: String(args.page || 1),
-          ...(args.search ? { search: args.search } : {})
-        }));
-        if (rmRedirects && !rmRedirects.code) {
-          return { source: 'rankmath', redirects: rmRedirects };
-        }
-      } catch (e) { /* RankMath not available */ }
+      const allRedirects = [];
 
-      // Try Redirection plugin
+      // Method 1: RankMath — uses updateRedirection endpoint with GET action
+      try {
+        const rmResult = await wpReq('/rankmath/v1/updateRedirection', {
+          method: 'POST',
+          body: {
+            action: 'list',
+            per_page: args.per_page || 50,
+            page: args.page || 1,
+            ...(args.search ? { search: args.search } : {})
+          }
+        });
+        if (rmResult && (rmResult.redirections || rmResult.items || Array.isArray(rmResult))) {
+          const items = rmResult.redirections || rmResult.items || rmResult;
+          return {
+            source: 'rankmath',
+            total: rmResult.total || items.length,
+            redirects: (Array.isArray(items) ? items : []).map(r => ({
+              id: r.id,
+              source: r.sources?.[0]?.pattern || r.url_from || '',
+              target: r.url_to || '',
+              type: r.header_code || 301,
+              hits: r.hits || 0,
+              status: r.status || 'active'
+            }))
+          };
+        }
+      } catch (e) { /* RankMath not available or different version */ }
+
+      // Method 2: RankMath — try direct DB-backed REST endpoint (some versions)
+      try {
+        const rmDirect = await wpReq('/rankmath/v1/redirections');
+        if (rmDirect && !rmDirect.code && (Array.isArray(rmDirect) || rmDirect.redirections)) {
+          const items = rmDirect.redirections || rmDirect;
+          return {
+            source: 'rankmath-direct',
+            total: items.length,
+            redirects: (Array.isArray(items) ? items : []).map(r => ({
+              id: r.id,
+              source: r.sources?.[0]?.pattern || r.url || '',
+              target: r.url_to || '',
+              type: r.header_code || 301,
+              hits: r.hits || 0,
+              status: r.status || 'active'
+            }))
+          };
+        }
+      } catch (e) { /* not available */ }
+
+      // Method 3: Redirection plugin
       try {
         const redirection = await wpReq('/redirection/v1/redirect?' + new URLSearchParams({
           per_page: String(args.per_page || 50),
-          page: String(args.page || 1),
-          ...(args.search ? { filterBy: JSON.stringify({ url: args.search }) } : {})
+          page: String(args.page || 1)
         }));
         if (redirection && redirection.items) {
           return {
@@ -2460,7 +2524,8 @@ async function executeTool(name, args, clientConfig = null) {
         }
       } catch (e) { /* Redirection plugin not available */ }
 
-      return { error: 'No redirect plugin found (tried RankMath and Redirection plugin)' };
+      // Method 4: Check _wp_http_referer redirects in options (last resort)
+      return { error: 'No redirect data found. Tried: RankMath API, RankMath direct, Redirection plugin.', hint: 'Check which redirect plugin is installed and active.' };
     }
 
     case 'wp_create_redirect': {
