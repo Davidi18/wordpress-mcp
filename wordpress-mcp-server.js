@@ -774,6 +774,27 @@ const tools = [
       required: ['post_type', 'title', 'content']
     }
   },
+  {
+    name: 'wp_update_custom_post',
+    description: 'Update an existing custom post type entry (product, experience, etc). Supports Yoast SEO via yoast_title/yoast_desc/yoast_canonical.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        site_url: { type: 'string', description: 'WordPress site URL' },
+        post_type: { type: 'string', description: 'Custom post type slug (e.g. product, experiences)' },
+        id: { type: 'number', description: 'Post ID to update' },
+        title: { type: 'string', description: 'Post title' },
+        content: { type: 'string', description: 'Post content (HTML)' },
+        status: { type: 'string', description: 'Post status' },
+        excerpt: { type: 'string', description: 'Post excerpt' },
+        meta: { type: 'object', description: 'Raw meta fields (key-value)' },
+        yoast_title: { type: 'string', description: 'Yoast SEO title (yoast_wpseo_title)' },
+        yoast_desc: { type: 'string', description: 'Yoast SEO meta description (yoast_wpseo_metadesc)' },
+        yoast_canonical: { type: 'string', description: 'Yoast canonical URL (yoast_wpseo_canonical)' }
+      },
+      required: ['post_type', 'id']
+    }
+  },
 
   // TAXONOMY (6 endpoints)
   {
@@ -1355,6 +1376,134 @@ const tools = [
       },
       required: ['id']
     }
+  },
+
+  // ELEMENTOR (7 endpoints)
+  {
+    name: 'wp_elementor_get_page',
+    description: 'Get a WordPress page with full Elementor data (_elementor_data meta). Returns the complete page object including Elementor widgets/sections.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Page ID', required: true }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_elementor_get_page_by_slug',
+    description: 'Find a page ID by its slug (URL-friendly name)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: 'The page slug to find', required: true }
+      },
+      required: ['slug']
+    }
+  },
+  {
+    name: 'wp_elementor_create_page',
+    description: 'Create a new WordPress page with Elementor data',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Page title', required: true },
+        status: { type: 'string', description: 'Page status (publish, draft, pending, private)', default: 'draft' },
+        content: { type: 'string', description: 'Standard WordPress content (optional)' },
+        elementor_data: { type: 'string', description: 'Elementor page data as JSON string', required: true }
+      },
+      required: ['title', 'elementor_data']
+    }
+  },
+  {
+    name: 'wp_elementor_update_page',
+    description: 'Update an existing page with Elementor data',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Page ID', required: true },
+        title: { type: 'string', description: 'Page title' },
+        status: { type: 'string', description: 'Page status' },
+        content: { type: 'string', description: 'Standard WordPress content' },
+        elementor_data: { type: 'string', description: 'Elementor page data as JSON string' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_elementor_delete_page',
+    description: 'Delete a WordPress page (Elementor or regular)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Page ID', required: true },
+        force: { type: 'boolean', description: 'Bypass trash and force deletion', default: false }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_elementor_download_page',
+    description: 'Download a page and save it to a local file. Can save full page or only Elementor data.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Page ID', required: true },
+        file_path: { type: 'string', description: 'Absolute path to save the file', required: true },
+        only_elementor_data: { type: 'boolean', description: 'Save only _elementor_data (not full page object)', default: false }
+      },
+      required: ['id', 'file_path']
+    }
+  },
+  {
+    name: 'wp_elementor_update_from_file',
+    description: 'Update a page with Elementor data read from a local file',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Page ID', required: true },
+        elementor_file_path: { type: 'string', description: 'Absolute path to the Elementor data JSON file', required: true },
+        title: { type: 'string', description: 'Page title (optional)' },
+        status: { type: 'string', description: 'Page status (optional)' },
+        content_file_path: { type: 'string', description: 'Absolute path to content file (optional)' }
+      },
+      required: ['id', 'elementor_file_path']
+    }
+  },
+  {
+    name: 'wp_elementor_list_templates',
+    description: 'List Elementor templates (saved sections, pages, global widgets) from the Elementor Library',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        template_type: { type: 'string', description: 'Filter by type: page, section, global, kit, container' },
+        per_page: { type: 'number', description: 'Results per page', default: 20 },
+        status: { type: 'string', description: 'Template status (publish, draft)', default: 'publish' }
+      }
+    }
+  },
+  {
+    name: 'wp_elementor_get_template',
+    description: 'Get a specific Elementor template by ID (includes _elementor_data)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Template ID', required: true }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_elementor_list_revisions',
+    description: 'List revisions for a page — useful for comparing versions or rolling back Elementor changes',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Page ID', required: true },
+        per_page: { type: 'number', description: 'Number of revisions to return', default: 10 }
+      },
+      required: ['id']
+    }
   }
 ];
 
@@ -1643,6 +1792,14 @@ async function executeTool(name, args, clientConfig = null) {
       if (args.content) updates.content = args.content;
       if (args.status) updates.status = args.status;
       if (args.excerpt) updates.excerpt = args.excerpt;
+      if (args.meta) updates.meta = args.meta;
+      // Yoast SEO shorthand
+      if (args.yoast_title || args.yoast_desc || args.yoast_canonical) {
+        updates.meta = updates.meta || {};
+        if (args.yoast_title) updates.meta['yoast_wpseo_title'] = args.yoast_title;
+        if (args.yoast_desc) updates.meta['yoast_wpseo_metadesc'] = args.yoast_desc;
+        if (args.yoast_canonical) updates.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
+      }
 
       const post = await wpReq(`/wp/v2/posts/${args.id}`, {
         method: 'POST',
@@ -1726,6 +1883,14 @@ async function executeTool(name, args, clientConfig = null) {
       if (args.title) updates.title = args.title;
       if (args.content) updates.content = args.content;
       if (args.status) updates.status = args.status;
+      if (args.meta) updates.meta = args.meta;
+      // Yoast SEO shorthand
+      if (args.yoast_title || args.yoast_desc || args.yoast_canonical) {
+        updates.meta = updates.meta || {};
+        if (args.yoast_title) updates.meta['yoast_wpseo_title'] = args.yoast_title;
+        if (args.yoast_desc) updates.meta['yoast_wpseo_metadesc'] = args.yoast_desc;
+        if (args.yoast_canonical) updates.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
+      }
 
       const page = await wpReq(`/wp/v2/pages/${args.id}`, {
         method: 'POST',
@@ -1751,6 +1916,132 @@ async function executeTool(name, args, clientConfig = null) {
         method: 'DELETE'
       });
       return { deleted: true, id: args.id };
+    }
+
+    // ELEMENTOR
+    case 'wp_elementor_get_page': {
+      const page = await wpReq(`/wp/v2/pages/${args.id}?context=edit`);
+      return page;
+    }
+
+    case 'wp_elementor_get_page_by_slug': {
+      const pages = await wpReq(`/wp/v2/pages?slug=${encodeURIComponent(args.slug)}&_fields=id`);
+      if (pages && pages.length > 0) {
+        return { id: pages[0].id };
+      }
+      throw new Error(`Page with slug '${args.slug}' not found.`);
+    }
+
+    case 'wp_elementor_create_page': {
+      if (args.elementor_data && typeof args.elementor_data === 'string') {
+        try { JSON.parse(args.elementor_data); } catch (e) {
+          throw new Error('elementor_data is not valid JSON string.');
+        }
+      }
+      const created = await wpReq('/wp/v2/pages', {
+        method: 'POST',
+        body: {
+          title: args.title,
+          status: args.status || 'draft',
+          content: args.content || '',
+          meta: { _elementor_data: args.elementor_data }
+        }
+      });
+      return { id: created.id, title: created.title?.rendered || args.title };
+    }
+
+    case 'wp_elementor_update_page': {
+      const updatePayload = {};
+      if (args.title) updatePayload.title = args.title;
+      if (args.status) updatePayload.status = args.status;
+      if (args.content) updatePayload.content = args.content;
+      if (args.elementor_data) {
+        if (typeof args.elementor_data === 'string') {
+          try { JSON.parse(args.elementor_data); } catch (e) {
+            throw new Error('elementor_data is not valid JSON string.');
+          }
+        }
+        updatePayload.meta = { _elementor_data: args.elementor_data };
+      }
+      if (Object.keys(updatePayload).length === 0) {
+        throw new Error('No update data provided (title, status, content, or elementor_data).');
+      }
+      await wpReq(`/wp/v2/pages/${args.id}`, {
+        method: 'POST',
+        body: updatePayload
+      });
+      return { updated: true, id: args.id };
+    }
+
+    case 'wp_elementor_delete_page': {
+      await wpReq(`/wp/v2/pages/${args.id}?force=${args.force || false}`, {
+        method: 'DELETE'
+      });
+      return { deleted: true, id: args.id };
+    }
+
+    case 'wp_elementor_download_page': {
+      const fs = require('fs');
+      const pageData = await wpReq(`/wp/v2/pages/${args.id}?context=edit`);
+      if (args.only_elementor_data) {
+        fs.writeFileSync(args.file_path, JSON.stringify(pageData.meta?._elementor_data, null, 0));
+      } else {
+        fs.writeFileSync(args.file_path, JSON.stringify(pageData, null, 0));
+      }
+      return { saved: true, path: args.file_path };
+    }
+
+    case 'wp_elementor_update_from_file': {
+      const fs2 = require('fs');
+      const elementorData = JSON.parse(fs2.readFileSync(args.elementor_file_path, 'utf8'));
+      const fileUpdatePayload = {
+        meta: { _elementor_data: JSON.stringify(elementorData, null, 0) }
+      };
+      if (args.title) fileUpdatePayload.title = args.title;
+      if (args.status) fileUpdatePayload.status = args.status;
+      if (args.content_file_path) {
+        fileUpdatePayload.content = fs2.readFileSync(args.content_file_path, 'utf8');
+      }
+      await wpReq(`/wp/v2/pages/${args.id}`, {
+        method: 'POST',
+        body: fileUpdatePayload
+      });
+      return { updated: true, id: args.id };
+    }
+
+    case 'wp_elementor_list_templates': {
+      const tplParams = new URLSearchParams({
+        per_page: String(args.per_page || 20),
+        status: args.status || 'publish'
+      });
+      const templates = await wpReq(`/wp/v2/elementor_library?${tplParams}`);
+      const result = (templates || []).map(t => ({
+        id: t.id,
+        title: t.title?.rendered || '',
+        status: t.status,
+        template_type: t.meta?._elementor_template_type || 'unknown',
+        modified: t.modified
+      }));
+      if (args.template_type) {
+        return result.filter(t => t.template_type === args.template_type);
+      }
+      return result;
+    }
+
+    case 'wp_elementor_get_template': {
+      const template = await wpReq(`/wp/v2/elementor_library/${args.id}?context=edit`);
+      return template;
+    }
+
+    case 'wp_elementor_list_revisions': {
+      const revisions = await wpReq(`/wp/v2/pages/${args.id}/revisions?per_page=${args.per_page || 10}`);
+      return (revisions || []).map(r => ({
+        id: r.id,
+        date: r.date,
+        author: r.author,
+        title: r.title?.rendered || '',
+        has_elementor_data: !!(r.meta?._elementor_data)
+      }));
     }
 
     // MEDIA
@@ -2031,6 +2322,37 @@ async function executeTool(name, args, clientConfig = null) {
         link: post.link,
         status: post.status,
         slug: post.slug,
+        meta: post.meta
+      };
+    }
+
+    case 'wp_update_custom_post': {
+      const postData = {};
+      if (args.title) postData.title = args.title;
+      if (args.content) postData.content = args.content;
+      if (args.status) postData.status = args.status;
+      if (args.excerpt) postData.excerpt = args.excerpt;
+      if (args.meta) postData.meta = args.meta;
+      // Yoast SEO shorthand
+      if (args.yoast_title || args.yoast_desc || args.yoast_canonical) {
+        postData.meta = postData.meta || {};
+        if (args.yoast_title) postData.meta['yoast_wpseo_title'] = args.yoast_title;
+        if (args.yoast_desc) postData.meta['yoast_wpseo_metadesc'] = args.yoast_desc;
+        if (args.yoast_canonical) postData.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
+      }
+      
+      const post = await wpReq(`/wp/v2/${args.post_type}/${args.id}`, {
+        method: 'POST',
+        body: JSON.stringify(postData)
+      });
+      
+      return { 
+        id: post.id, 
+        title: post.title?.rendered,
+        link: post.link,
+        status: post.status,
+        slug: post.slug,
+        modified: post.modified,
         meta: post.meta
       };
     }
@@ -3524,6 +3846,18 @@ const server = http.createServer(async (req, res) => {
       if (args && args.client) {
         clientConfig = await getClientConfig(args.client);
         delete args.client; // Remove from args after extracting
+      }
+
+      // Handle site_url as client identifier (convert domain to client id)
+      if (args && args.site_url && !clientConfig) {
+        const siteUrl = args.site_url;
+        const domain = siteUrl.replace(/^https?:\/\/(www\.)?/, '').replace(/\/+$/, '').replace(/\./g, '-');
+        try {
+          clientConfig = await getClientConfig(domain);
+        } catch(e) {
+          console.log(`site_url client lookup failed for "${domain}": ${e.message}`);
+        }
+        delete args.site_url;
       }
 
       // Flatten nested arguments
