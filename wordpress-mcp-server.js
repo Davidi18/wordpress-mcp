@@ -1504,6 +1504,153 @@ const tools = [
       },
       required: ['id']
     }
+  },
+
+  // ── MENUS ──
+  {
+    name: 'wp_get_menus',
+    description: 'List all navigation menus on the site',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'wp_get_menu_items',
+    description: 'Get all items in a specific menu (links, pages, categories, custom items)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        menu_id: { type: 'number', description: 'Menu ID (from wp_get_menus)', required: true }
+      },
+      required: ['menu_id']
+    }
+  },
+
+  // ── SEARCH ──
+  {
+    name: 'wp_search',
+    description: 'Unified search across all content types (posts, pages, media, categories, tags)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        search: { type: 'string', description: 'Search query', required: true },
+        type: { type: 'string', description: 'Filter by type: post, page, category, post_tag' },
+        per_page: { type: 'number', description: 'Results per page', default: 20 }
+      },
+      required: ['search']
+    }
+  },
+
+  // ── BULK OPERATIONS ──
+  {
+    name: 'wp_bulk_update_posts',
+    description: 'Update multiple posts/pages at once (change status, category, author, meta fields). Saves API calls.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: { type: 'array', items: { type: 'number' }, description: 'Array of post/page IDs to update', required: true },
+        updates: {
+          type: 'object',
+          description: 'Fields to update on all items: status, categories, tags, author, meta, etc.',
+          properties: {
+            status: { type: 'string', description: 'draft, publish, pending, private, trash' },
+            categories: { type: 'array', items: { type: 'number' }, description: 'Category IDs' },
+            tags: { type: 'array', items: { type: 'number' }, description: 'Tag IDs' },
+            author: { type: 'number', description: 'Author user ID' },
+            meta: { type: 'object', description: 'Meta fields to update' }
+          }
+        },
+        post_type: { type: 'string', description: 'posts or pages', default: 'posts' }
+      },
+      required: ['ids', 'updates']
+    }
+  },
+
+  // ── PAGE TREE ──
+  {
+    name: 'wp_get_page_tree',
+    description: 'Get hierarchical page structure (parent/child relationships) — useful for understanding site architecture',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        per_page: { type: 'number', description: 'Max pages to fetch', default: 100 }
+      }
+    }
+  },
+
+  // ── RANKMATH SEO ──
+  {
+    name: 'wp_rankmath_update_meta',
+    description: 'Update RankMath SEO meta (title, description, focus keyword) for a post/page. Works on sites with RankMath plugin (caio, kedma, shukeat).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Post/page ID', required: true },
+        post_type: { type: 'string', description: 'post or page', default: 'post' },
+        title: { type: 'string', description: 'SEO title' },
+        description: { type: 'string', description: 'Meta description' },
+        focus_keyword: { type: 'string', description: 'Focus keyword' },
+        robots: { type: 'array', items: { type: 'string' }, description: 'Robots directives: index, noindex, follow, nofollow' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_rankmath_get_meta',
+    description: 'Get RankMath SEO meta (title, description, focus keyword, robots, score) for a post/page',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Post/page ID', required: true },
+        post_type: { type: 'string', description: 'post or page', default: 'post' }
+      },
+      required: ['id']
+    }
+  },
+
+  // ── YOAST SEO ──
+  {
+    name: 'wp_yoast_get_head',
+    description: 'Get Yoast SEO head data (title, description, og tags, schema, robots) for any URL. Works on sites with Yoast (smartup, xod).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Full URL to get SEO head for', required: true }
+      },
+      required: ['url']
+    }
+  },
+
+  // ── SETTINGS ──
+  {
+    name: 'wp_get_settings',
+    description: 'Get WordPress site settings (title, tagline, timezone, language, date/time format, URL)',
+    inputSchema: { type: 'object', properties: {} }
+  },
+
+  // ── REDIRECTS ──
+  {
+    name: 'wp_get_redirects',
+    description: 'List redirects managed by Redirection or RankMath plugin. Returns source URL, target URL, type (301/302), and hit count.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        per_page: { type: 'number', description: 'Results per page', default: 50 },
+        page: { type: 'number', description: 'Page number', default: 1 },
+        search: { type: 'string', description: 'Search redirects by URL' }
+      }
+    }
+  },
+  {
+    name: 'wp_create_redirect',
+    description: 'Create a new redirect rule (301/302). Uses RankMath or Redirection plugin API.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: 'Source URL path (e.g. /old-page)', required: true },
+        target: { type: 'string', description: 'Target URL (e.g. /new-page or full URL)', required: true },
+        type: { type: 'number', description: 'Redirect type: 301 (permanent) or 302 (temporary)', default: 301 }
+      },
+      required: ['source', 'target']
+    }
   }
 ];
 
@@ -2042,6 +2189,250 @@ async function executeTool(name, args, clientConfig = null) {
         title: r.title?.rendered || '',
         has_elementor_data: !!(r.meta?._elementor_data)
       }));
+    }
+
+    // ── MENUS ──
+    case 'wp_get_menus': {
+      const menus = await wpReq('/wp/v2/menus');
+      return (menus || []).map(m => ({
+        id: m.id,
+        name: m.name,
+        slug: m.slug,
+        description: m.description || '',
+        locations: m.locations || [],
+        count: m.count || 0
+      }));
+    }
+
+    case 'wp_get_menu_items': {
+      const items = await wpReq(`/wp/v2/menu-items?menus=${args.menu_id}&per_page=100`);
+      return (items || []).map(item => ({
+        id: item.id,
+        title: item.title?.rendered || '',
+        url: item.url,
+        type: item.type,
+        parent: item.parent || 0,
+        menu_order: item.menu_order,
+        object: item.object,
+        object_id: item.object_id
+      }));
+    }
+
+    // ── SEARCH ──
+    case 'wp_search': {
+      const searchParams = new URLSearchParams({
+        search: args.search,
+        per_page: String(args.per_page || 20)
+      });
+      if (args.type) searchParams.set('type', args.type);
+      const results = await wpReq(`/wp/v2/search?${searchParams}`);
+      return (results || []).map(r => ({
+        id: r.id,
+        title: r.title,
+        url: r.url,
+        type: r.type,
+        subtype: r.subtype
+      }));
+    }
+
+    // ── BULK OPERATIONS ──
+    case 'wp_bulk_update_posts': {
+      const postType = args.post_type === 'pages' ? 'pages' : 'posts';
+      const results = [];
+      // Process in batches of 5 to avoid rate limits
+      for (let i = 0; i < args.ids.length; i += 5) {
+        const batch = args.ids.slice(i, i + 5);
+        const promises = batch.map(async (id) => {
+          try {
+            await wpReq(`/wp/v2/${postType}/${id}`, {
+              method: 'POST',
+              body: args.updates
+            });
+            return { id, success: true };
+          } catch (e) {
+            return { id, success: false, error: e.message };
+          }
+        });
+        const batchResults = await Promise.all(promises);
+        results.push(...batchResults);
+        if (i + 5 < args.ids.length) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+      return {
+        total: args.ids.length,
+        succeeded: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length,
+        results
+      };
+    }
+
+    // ── PAGE TREE ──
+    case 'wp_get_page_tree': {
+      const allPages = await wpReq(`/wp/v2/pages?per_page=${args.per_page || 100}&_fields=id,title,slug,parent,status,menu_order,link`);
+      const pages = (allPages || []).map(p => ({
+        id: p.id,
+        title: p.title?.rendered || '',
+        slug: p.slug,
+        parent: p.parent || 0,
+        status: p.status,
+        menu_order: p.menu_order,
+        link: p.link
+      }));
+      // Build tree structure
+      const byId = {};
+      pages.forEach(p => { byId[p.id] = { ...p, children: [] }; });
+      const tree = [];
+      pages.forEach(p => {
+        if (p.parent && byId[p.parent]) {
+          byId[p.parent].children.push(byId[p.id]);
+        } else {
+          tree.push(byId[p.id]);
+        }
+      });
+      return { total: pages.length, tree };
+    }
+
+    // ── RANKMATH SEO ──
+    case 'wp_rankmath_update_meta': {
+      const rmMeta = {};
+      if (args.title) rmMeta.rank_math_title = args.title;
+      if (args.description) rmMeta.rank_math_description = args.description;
+      if (args.focus_keyword) rmMeta.rank_math_focus_keyword = args.focus_keyword;
+      if (args.robots) rmMeta.rank_math_robots = args.robots;
+      const endpoint = args.post_type === 'page' ? 'pages' : 'posts';
+      await wpReq(`/wp/v2/${endpoint}/${args.id}`, {
+        method: 'POST',
+        body: { meta: rmMeta }
+      });
+      return { updated: true, id: args.id, fields: Object.keys(rmMeta) };
+    }
+
+    case 'wp_rankmath_get_meta': {
+      const endpoint2 = args.post_type === 'page' ? 'pages' : 'posts';
+      const rmPost = await wpReq(`/wp/v2/${endpoint2}/${args.id}?context=edit`);
+      const meta = rmPost?.meta || {};
+      return {
+        id: args.id,
+        title: meta.rank_math_title || '',
+        description: meta.rank_math_description || '',
+        focus_keyword: meta.rank_math_focus_keyword || '',
+        robots: meta.rank_math_robots || [],
+        seo_score: meta.rank_math_seo_score || null,
+        pillar_content: meta.rank_math_pillar_content || false,
+        canonical_url: meta.rank_math_canonical_url || ''
+      };
+    }
+
+    // ── YOAST SEO ──
+    case 'wp_yoast_get_head': {
+      const yoastData = await wpReq(`/yoast/v1/get_head?url=${encodeURIComponent(args.url)}`);
+      if (yoastData?.code) {
+        return { error: yoastData.message || 'Yoast API error', hint: 'Yoast SEO may not be installed on this site' };
+      }
+      return {
+        status: yoastData?.status || 200,
+        json: yoastData?.json || {},
+        html: (yoastData?.html || '').substring(0, 2000)
+      };
+    }
+
+    // ── SETTINGS ──
+    case 'wp_get_settings': {
+      const settings = await wpReq('/wp/v2/settings');
+      return {
+        title: settings?.title || '',
+        tagline: settings?.description || '',
+        url: settings?.url || '',
+        timezone: settings?.timezone_string || settings?.gmt_offset || '',
+        language: settings?.language || '',
+        date_format: settings?.date_format || '',
+        time_format: settings?.time_format || '',
+        posts_per_page: settings?.posts_per_page || 10,
+        default_comment_status: settings?.default_comment_status || ''
+      };
+    }
+
+    // ── REDIRECTS ──
+    case 'wp_get_redirects': {
+      // Try RankMath redirections first, fall back to Redirection plugin
+      try {
+        const rmRedirects = await wpReq('/rankmath/v1/redirections?' + new URLSearchParams({
+          per_page: String(args.per_page || 50),
+          page: String(args.page || 1),
+          ...(args.search ? { search: args.search } : {})
+        }));
+        if (rmRedirects && !rmRedirects.code) {
+          return { source: 'rankmath', redirects: rmRedirects };
+        }
+      } catch (e) { /* RankMath not available */ }
+
+      // Try Redirection plugin
+      try {
+        const redirection = await wpReq('/redirection/v1/redirect?' + new URLSearchParams({
+          per_page: String(args.per_page || 50),
+          page: String(args.page || 1),
+          ...(args.search ? { filterBy: JSON.stringify({ url: args.search }) } : {})
+        }));
+        if (redirection && redirection.items) {
+          return {
+            source: 'redirection-plugin',
+            total: redirection.total || 0,
+            redirects: (redirection.items || []).map(r => ({
+              id: r.id,
+              source: r.url,
+              target: r.action_data?.url || '',
+              type: r.action_code || 301,
+              hits: r.hits || 0,
+              last_access: r.last_access || null,
+              enabled: r.enabled !== false
+            }))
+          };
+        }
+      } catch (e) { /* Redirection plugin not available */ }
+
+      return { error: 'No redirect plugin found (tried RankMath and Redirection plugin)' };
+    }
+
+    case 'wp_create_redirect': {
+      // Try RankMath first
+      try {
+        const result = await wpReq('/rankmath/v1/updateRedirection', {
+          method: 'POST',
+          body: {
+            action: 'update',
+            redirection: {
+              sources: [{ pattern: args.source, comparison: 'exact' }],
+              url_to: args.target,
+              header_code: args.type || 301,
+              status: 'active'
+            }
+          }
+        });
+        if (result && !result.code) {
+          return { created: true, source: 'rankmath', redirect: result };
+        }
+      } catch (e) { /* RankMath not available */ }
+
+      // Try Redirection plugin
+      try {
+        const result = await wpReq('/redirection/v1/redirect', {
+          method: 'POST',
+          body: {
+            url: args.source,
+            action_data: { url: args.target },
+            action_type: 'url',
+            action_code: args.type || 301,
+            group_id: 1,
+            match_type: 'url'
+          }
+        });
+        if (result && result.id) {
+          return { created: true, source: 'redirection-plugin', id: result.id };
+        }
+      } catch (e) { /* Redirection plugin not available */ }
+
+      return { error: 'No redirect plugin found (tried RankMath and Redirection plugin)' };
     }
 
     // MEDIA
