@@ -1967,17 +1967,17 @@ async function executeTool(name, args, clientConfig = null) {
 
     case 'wp_update_post': {
       const updates = {};
-      if (args.title) updates.title = args.title;
-      if (args.content) updates.content = args.content;
-      if (args.status) updates.status = args.status;
-      if (args.excerpt) updates.excerpt = args.excerpt;
-      if (args.meta) updates.meta = args.meta;
+      if (args.title !== undefined) updates.title = args.title;
+      if (args.content !== undefined) updates.content = args.content;
+      if (args.status !== undefined) updates.status = args.status;
+      if (args.excerpt !== undefined) updates.excerpt = args.excerpt;
+      if (args.meta !== undefined) updates.meta = args.meta;
       // Yoast SEO shorthand
-      if (args.yoast_title || args.yoast_desc || args.yoast_canonical) {
+      if (args.yoast_title !== undefined || args.yoast_desc !== undefined || args.yoast_canonical !== undefined) {
         updates.meta = updates.meta || {};
-        if (args.yoast_title) updates.meta['yoast_wpseo_title'] = args.yoast_title;
-        if (args.yoast_desc) updates.meta['yoast_wpseo_metadesc'] = args.yoast_desc;
-        if (args.yoast_canonical) updates.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
+        if (args.yoast_title !== undefined) updates.meta['yoast_wpseo_title'] = args.yoast_title;
+        if (args.yoast_desc !== undefined) updates.meta['yoast_wpseo_metadesc'] = args.yoast_desc;
+        if (args.yoast_canonical !== undefined) updates.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
       }
 
       const post = await wpReq(`/wp/v2/posts/${args.id}`, {
@@ -2059,16 +2059,16 @@ async function executeTool(name, args, clientConfig = null) {
 
     case 'wp_update_page': {
       const updates = {};
-      if (args.title) updates.title = args.title;
-      if (args.content) updates.content = args.content;
-      if (args.status) updates.status = args.status;
-      if (args.meta) updates.meta = args.meta;
+      if (args.title !== undefined) updates.title = args.title;
+      if (args.content !== undefined) updates.content = args.content;
+      if (args.status !== undefined) updates.status = args.status;
+      if (args.meta !== undefined) updates.meta = args.meta;
       // Yoast SEO shorthand
-      if (args.yoast_title || args.yoast_desc || args.yoast_canonical) {
+      if (args.yoast_title !== undefined || args.yoast_desc !== undefined || args.yoast_canonical !== undefined) {
         updates.meta = updates.meta || {};
-        if (args.yoast_title) updates.meta['yoast_wpseo_title'] = args.yoast_title;
-        if (args.yoast_desc) updates.meta['yoast_wpseo_metadesc'] = args.yoast_desc;
-        if (args.yoast_canonical) updates.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
+        if (args.yoast_title !== undefined) updates.meta['yoast_wpseo_title'] = args.yoast_title;
+        if (args.yoast_desc !== undefined) updates.meta['yoast_wpseo_metadesc'] = args.yoast_desc;
+        if (args.yoast_canonical !== undefined) updates.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
       }
 
       const page = await wpReq(`/wp/v2/pages/${args.id}`, {
@@ -2131,9 +2131,9 @@ async function executeTool(name, args, clientConfig = null) {
 
     case 'wp_elementor_update_page': {
       const updatePayload = {};
-      if (args.title) updatePayload.title = args.title;
-      if (args.status) updatePayload.status = args.status;
-      if (args.content) updatePayload.content = args.content;
+      if (args.title !== undefined) updatePayload.title = args.title;
+      if (args.status !== undefined) updatePayload.status = args.status;
+      if (args.content !== undefined) updatePayload.content = args.content;
       if (args.elementor_data) {
         if (typeof args.elementor_data === 'string') {
           try { JSON.parse(args.elementor_data); } catch (e) {
@@ -2176,8 +2176,8 @@ async function executeTool(name, args, clientConfig = null) {
       const fileUpdatePayload = {
         meta: { _elementor_data: JSON.stringify(elementorData, null, 0) }
       };
-      if (args.title) fileUpdatePayload.title = args.title;
-      if (args.status) fileUpdatePayload.status = args.status;
+      if (args.title !== undefined) fileUpdatePayload.title = args.title;
+      if (args.status !== undefined) fileUpdatePayload.status = args.status;
       if (args.content_file_path) {
         fileUpdatePayload.content = fs2.readFileSync(args.content_file_path, 'utf8');
       }
@@ -2332,10 +2332,10 @@ async function executeTool(name, args, clientConfig = null) {
     // ── RANKMATH SEO ──
     case 'wp_rankmath_update_meta': {
       const rmMeta = {};
-      if (args.title) rmMeta.rank_math_title = args.title;
-      if (args.description) rmMeta.rank_math_description = args.description;
-      if (args.focus_keyword) rmMeta.rank_math_focus_keyword = args.focus_keyword;
-      if (args.robots) rmMeta.rank_math_robots = args.robots;
+      if (args.title !== undefined) rmMeta.rank_math_title = args.title;
+      if (args.description !== undefined) rmMeta.rank_math_description = args.description;
+      if (args.focus_keyword !== undefined) rmMeta.rank_math_focus_keyword = args.focus_keyword;
+      if (args.robots !== undefined) rmMeta.rank_math_robots = args.robots;
       const endpoint = args.post_type === 'page' ? 'pages' : 'posts';
       await wpReq(`/wp/v2/${endpoint}/${args.id}`, {
         method: 'POST',
@@ -2613,10 +2613,10 @@ async function executeTool(name, args, clientConfig = null) {
         body: buffer
       });
       
-      if (args.title || args.alt_text) {
+      if (args.title !== undefined || args.alt_text !== undefined) {
         const updates = {};
-        if (args.title) updates.title = args.title;
-        if (args.alt_text) updates.alt_text = args.alt_text;
+        if (args.title !== undefined) updates.title = args.title;
+        if (args.alt_text !== undefined) updates.alt_text = args.alt_text;
         
         await wpReq(`/wp/v2/media/${media.id}`, {
           method: 'POST',
@@ -2636,10 +2636,10 @@ async function executeTool(name, args, clientConfig = null) {
 
     case 'wp_update_media': {
       const updates = {};
-      if (args.title) updates.title = { raw: args.title };
+      if (args.title !== undefined) updates.title = { raw: args.title };
       if (args.alt_text !== undefined) updates.alt_text = args.alt_text;
-      if (args.caption) updates.caption = { raw: args.caption };
-      if (args.description) updates.description = { raw: args.description };
+      if (args.caption !== undefined) updates.caption = { raw: args.caption };
+      if (args.description !== undefined) updates.description = { raw: args.description };
       if (args.post !== undefined) updates.post = args.post;
 
       if (Object.keys(updates).length === 0) {
@@ -2724,8 +2724,8 @@ async function executeTool(name, args, clientConfig = null) {
 
     case 'wp_update_comment': {
       const updates = {};
-      if (args.content) updates.content = args.content;
-      if (args.status) updates.status = args.status;
+      if (args.content !== undefined) updates.content = args.content;
+      if (args.status !== undefined) updates.status = args.status;
 
       const comment = await wpReq(`/wp/v2/comments/${args.id}`, {
         method: 'POST',
@@ -2853,17 +2853,17 @@ async function executeTool(name, args, clientConfig = null) {
 
     case 'wp_update_custom_post': {
       const postData = {};
-      if (args.title) postData.title = args.title;
-      if (args.content) postData.content = args.content;
-      if (args.status) postData.status = args.status;
-      if (args.excerpt) postData.excerpt = args.excerpt;
-      if (args.meta) postData.meta = args.meta;
+      if (args.title !== undefined) postData.title = args.title;
+      if (args.content !== undefined) postData.content = args.content;
+      if (args.status !== undefined) postData.status = args.status;
+      if (args.excerpt !== undefined) postData.excerpt = args.excerpt;
+      if (args.meta !== undefined) postData.meta = args.meta;
       // Yoast SEO shorthand
-      if (args.yoast_title || args.yoast_desc || args.yoast_canonical) {
+      if (args.yoast_title !== undefined || args.yoast_desc !== undefined || args.yoast_canonical !== undefined) {
         postData.meta = postData.meta || {};
-        if (args.yoast_title) postData.meta['yoast_wpseo_title'] = args.yoast_title;
-        if (args.yoast_desc) postData.meta['yoast_wpseo_metadesc'] = args.yoast_desc;
-        if (args.yoast_canonical) postData.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
+        if (args.yoast_title !== undefined) postData.meta['yoast_wpseo_title'] = args.yoast_title;
+        if (args.yoast_desc !== undefined) postData.meta['yoast_wpseo_metadesc'] = args.yoast_desc;
+        if (args.yoast_canonical !== undefined) postData.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
       }
       
       const post = await wpReq(`/wp/v2/${args.post_type}/${args.id}`, {
@@ -2920,7 +2920,7 @@ async function executeTool(name, args, clientConfig = null) {
 
     case 'wp_update_category': {
       const updates = {};
-      if (args.name) updates.name = args.name;
+      if (args.name !== undefined) updates.name = args.name;
       if (args.description !== undefined) updates.description = args.description;
       if (args.parent !== undefined) updates.parent = args.parent;
 
@@ -3817,13 +3817,13 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
 
     case 'wc_update_product': {
       const payload = {};
-      if (args.name) payload.name = args.name;
-      if (args.status) payload.status = args.status;
-      if (args.regular_price) payload.regular_price = args.regular_price;
+      if (args.name !== undefined) payload.name = args.name;
+      if (args.status !== undefined) payload.status = args.status;
+      if (args.regular_price !== undefined) payload.regular_price = args.regular_price;
       if (args.sale_price !== undefined) payload.sale_price = args.sale_price;
-      if (args.description) payload.description = args.description;
-      if (args.short_description) payload.short_description = args.short_description;
-      if (args.sku) payload.sku = args.sku;
+      if (args.description !== undefined) payload.description = args.description;
+      if (args.short_description !== undefined) payload.short_description = args.short_description;
+      if (args.sku !== undefined) payload.sku = args.sku;
       if (args.categories) payload.categories = args.categories;
       if (args.images) payload.images = args.images;
       if (args.manage_stock !== undefined) payload.manage_stock = args.manage_stock;
@@ -3908,10 +3908,10 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
 
     case 'wc_update_category': {
       const payload = {};
-      if (args.name) payload.name = args.name;
-      if (args.slug) payload.slug = args.slug;
+      if (args.name !== undefined) payload.name = args.name;
+      if (args.slug !== undefined) payload.slug = args.slug;
       if (args.parent !== undefined) payload.parent = args.parent;
-      if (args.description) payload.description = args.description;
+      if (args.description !== undefined) payload.description = args.description;
       if (args.image) payload.image = args.image;
 
       const category = await wpReq(`/wc/v3/products/categories/${args.id}`, {
@@ -3991,9 +3991,9 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
 
     case 'wc_update_variation': {
       const payload = {};
-      if (args.regular_price) payload.regular_price = args.regular_price;
+      if (args.regular_price !== undefined) payload.regular_price = args.regular_price;
       if (args.sale_price !== undefined) payload.sale_price = args.sale_price;
-      if (args.sku) payload.sku = args.sku;
+      if (args.sku !== undefined) payload.sku = args.sku;
       if (args.stock_quantity !== undefined) payload.stock_quantity = args.stock_quantity;
       if (args.stock_status) payload.stock_status = args.stock_status;
       if (args.image) payload.image = args.image;
@@ -4064,9 +4064,9 @@ function agency_os_install_plugin(WP_REST_Request \\$request) {
 
     case 'wc_update_order': {
       const payload = {};
-      if (args.status) payload.status = args.status;
-      if (args.customer_note) payload.customer_note = args.customer_note;
-      if (args.meta_data) payload.meta_data = args.meta_data;
+      if (args.status !== undefined) payload.status = args.status;
+      if (args.customer_note !== undefined) payload.customer_note = args.customer_note;
+      if (args.meta_data !== undefined) payload.meta_data = args.meta_data;
 
       const order = await wpReq(`/wc/v3/orders/${args.id}`, {
         method: 'PUT',
