@@ -3443,7 +3443,8 @@ return "Agency OS File API installed successfully! ($result bytes)";`;
         }
       }
 
-      const plugin = await wpReq(`/wp/v2/plugins/${encodeURIComponent(pluginId)}`, {
+      const pluginPath = pluginId.split('/').map(encodeURIComponent).join('/');
+      const plugin = await wpReq(`/wp/v2/plugins/${pluginPath}`, {
         method: 'POST',
         body: JSON.stringify({ status: 'active' })
       });
@@ -3473,7 +3474,8 @@ return "Agency OS File API installed successfully! ($result bytes)";`;
         }
       }
 
-      const plugin = await wpReq(`/wp/v2/plugins/${encodeURIComponent(pluginId)}`, {
+      const pluginPath = pluginId.split('/').map(encodeURIComponent).join('/');
+      const plugin = await wpReq(`/wp/v2/plugins/${pluginPath}`, {
         method: 'POST',
         body: JSON.stringify({ status: 'inactive' })
       });
@@ -3507,7 +3509,8 @@ return "Agency OS File API installed successfully! ($result bytes)";`;
         }
       }
 
-      await wpReq(`/wp/v2/plugins/${encodeURIComponent(pluginId)}`, {
+      const pluginPath = pluginId.split('/').map(encodeURIComponent).join('/');
+      await wpReq(`/wp/v2/plugins/${pluginPath}`, {
         method: 'DELETE'
       });
 
@@ -3534,17 +3537,12 @@ return "Agency OS File API installed successfully! ($result bytes)";`;
         }
       }
 
-      // WordPress REST API doesn't have a direct update endpoint
-      // We need to use the update endpoint or reinstall
-      // The standard way is to POST to plugins with the slug
-      const slug = pluginId.split('/')[0];
+      // Use the WP REST API PUT endpoint to trigger a plugin update
+      const pluginPath = pluginId.split('/').map(encodeURIComponent).join('/');
 
-      const plugin = await wpReq('/wp/v2/plugins', {
-        method: 'POST',
-        body: JSON.stringify({
-          slug: slug,
-          status: 'active'
-        })
+      const plugin = await wpReq(`/wp/v2/plugins/${pluginPath}`, {
+        method: 'PUT',
+        body: JSON.stringify({})
       });
 
       return {
