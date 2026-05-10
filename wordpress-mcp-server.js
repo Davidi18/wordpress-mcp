@@ -5,6 +5,7 @@
 // Multi-Client Support with dynamic PostgreSQL loading
 
 import http from 'http';
+import fs from 'fs';
 import pg from 'pg';
 
 const PORT = parseInt(process.env.PORT || '8080');
@@ -333,6 +334,26 @@ const WC_SECRET = initConfig.wc_secret;
 console.log(`🚀 Default Client: ${initConfig.name} (${initConfig.source})`);
 if (WC_KEY) console.log(`🛒 WooCommerce: Credentials configured`);
 
+function normalizeRequestOptions(options = {}) {
+  const normalized = { ...options };
+
+  // Several tools pass plain objects as `body`. Native fetch sends those as
+  // "[object Object]", which WordPress then rejects as invalid JSON. Keep
+  // pre-stringified JSON, buffers, streams and form payloads untouched.
+  if (
+    normalized.body &&
+    typeof normalized.body === 'object' &&
+    !(normalized.body instanceof URLSearchParams) &&
+    !(typeof FormData !== 'undefined' && normalized.body instanceof FormData) &&
+    !(typeof Blob !== 'undefined' && normalized.body instanceof Blob) &&
+    !Buffer.isBuffer(normalized.body)
+  ) {
+    normalized.body = JSON.stringify(normalized.body);
+  }
+
+  return normalized;
+}
+
 async function wpRequest(endpoint, options = {}) {
   let url = `${wpApiBase}${endpoint}`;
 
@@ -350,12 +371,14 @@ async function wpRequest(endpoint, options = {}) {
   // Debug logging
   console.log(`🌐 wpRequest URL: ${url.replace(/consumer_secret=[^&]+/, 'consumer_secret=***')}`);
 
+  const requestOptions = normalizeRequestOptions(options);
+
   const response = await fetch(url, {
-    ...options,
+    ...requestOptions,
     headers: {
       'Authorization': authHeader,
       'Content-Type': 'application/json',
-      ...options.headers
+      ...requestOptions.headers
     }
   });
 
@@ -398,12 +421,14 @@ function createWpRequestForClient(clientConfig) {
     // Debug logging
     console.log(`🌐 wpRequestForClient [${clientConfig.name}] URL: ${url.replace(/consumer_secret=[^&]+/, 'consumer_secret=***')}`);
 
+    const requestOptions = normalizeRequestOptions(options);
+
     const response = await fetch(url, {
-      ...options,
+      ...requestOptions,
       headers: {
         'Authorization': authHeader,
         'Content-Type': 'application/json',
-        ...options.headers
+        ...requestOptions.headers
       }
     });
 
@@ -2160,10 +2185,13 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_elementor_download_page': {
-      const fs = require('fs');
       const pageData = await wpReq(`/wp/v2/pages/${args.id}?context=edit`);
       if (args.only_elementor_data) {
-        fs.writeFileSync(args.file_path, JSON.stringify(pageData.meta?._elementor_data, null, 0));
+        const elementorData = pageData.meta?._elementor_data ?? '';
+        fs.writeFileSync(
+          args.file_path,
+          typeof elementorData === 'string' ? elementorData : JSON.stringify(elementorData, null, 0)
+        );
       } else {
         fs.writeFileSync(args.file_path, JSON.stringify(pageData, null, 0));
       }
@@ -2171,15 +2199,18 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_elementor_update_from_file': {
-      const fs2 = require('fs');
-      const elementorData = JSON.parse(fs2.readFileSync(args.elementor_file_path, 'utf8'));
+      const rawElementorData = fs.readFileSync(args.elementor_file_path, 'utf8');
+      const parsedElementorData = JSON.parse(rawElementorData);
+      const elementorData = typeof parsedElementorData === 'string'
+        ? parsedElementorData
+        : JSON.stringify(parsedElementorData, null, 0);
       const fileUpdatePayload = {
-        meta: { _elementor_data: JSON.stringify(elementorData, null, 0) }
+        meta: { _elementor_data: elementorData }
       };
       if (args.title !== undefined) fileUpdatePayload.title = args.title;
       if (args.status !== undefined) fileUpdatePayload.status = args.status;
       if (args.content_file_path) {
-        fileUpdatePayload.content = fs2.readFileSync(args.content_file_path, 'utf8');
+        fileUpdatePayload.content = fs.readFileSync(args.content_file_path, 'utf8');
       }
       await wpReq(`/wp/v2/pages/${args.id}`, {
         method: 'POST',
