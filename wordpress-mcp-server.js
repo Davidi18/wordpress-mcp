@@ -1587,6 +1587,72 @@ const tools = [
     }
   },
 
+  // ── CONTROL PLANE (snapshots / publish / replace) ──
+  // Requires the `agency-os-control-plane.php` mu-plugin installed on the site.
+  {
+    name: 'wp_snapshot_create',
+    description: 'Take a snapshot of a post/page (title, content, status, _elementor_data). Stored in postmeta, auto-pruned to the newest 5. Use this BEFORE any risky edit so you can roll back with wp_snapshot_restore.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        post_id: { type: 'number', description: 'Post or page id to snapshot' },
+        label: { type: 'string', description: 'Optional human-readable label (e.g. "before hero rewrite")' }
+      },
+      required: ['post_id']
+    }
+  },
+  {
+    name: 'wp_snapshot_list',
+    description: 'List all snapshots stored for a post/page, newest first. Returns snapshot_id, ts, date, label, post_status, elementor_bytes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        post_id: { type: 'number', description: 'Post or page id' }
+      },
+      required: ['post_id']
+    }
+  },
+  {
+    name: 'wp_snapshot_restore',
+    description: 'Restore a post/page from a snapshot. Automatically takes a fresh snapshot of the current state first (labeled "pre-restore:...") so you can undo the undo. Returns verified=true if bytes match.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        post_id: { type: 'number', description: 'Post or page id to restore' },
+        snapshot_id: { type: 'string', description: 'Snapshot id from wp_snapshot_list' }
+      },
+      required: ['post_id', 'snapshot_id']
+    }
+  },
+  {
+    name: 'wp_publish_draft_over',
+    description: 'Promote a draft on top of an existing canonical post: snapshot the target, copy title/content/_elementor_data from draft into target (preserving target id, URL, and post_status), then permanently delete the draft. Use this to ship a redesign without changing the live page id/URL.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        draft_id: { type: 'number', description: 'Source draft post id (will be deleted)' },
+        target_id: { type: 'number', description: 'Live target post id (will be overwritten with draft content)' }
+      },
+      required: ['draft_id', 'target_id']
+    }
+  },
+  {
+    name: 'wp_replace_text',
+    description: 'Bulk find/replace across a post: post_content + Elementor widget text fields (title, editor HTML, button text, descriptions, captions, tab titles, testimonials, etc.). Skips dynamic-tag fields. Defaults to literal case-sensitive match; set regex=true or case_insensitive=true to change. Use dry_run=true to preview matches without writing. Auto-snapshots before any write.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        post_id: { type: 'number', description: 'Post or page id' },
+        find: { type: 'string', description: 'String to find (or regex pattern if regex=true)' },
+        replace: { type: 'string', description: 'Replacement string (default empty = deletion)', default: '' },
+        regex: { type: 'boolean', description: 'Treat `find` as a PCRE regex pattern (without delimiters)', default: false },
+        case_insensitive: { type: 'boolean', description: 'Match case-insensitively', default: false },
+        dry_run: { type: 'boolean', description: 'Report matches without writing', default: false }
+      },
+      required: ['post_id', 'find']
+    }
+  },
+
   // ── MENUS ──
   {
     name: 'wp_get_menus',
@@ -2357,6 +2423,47 @@ async function executeTool(name, args, clientConfig = null) {
         total_sections: merged.length,
         position
       };
+    }
+
+    // ── CONTROL PLANE ──
+    // All endpoints provided by agency-os-control-plane.php mu-plugin.
+    case 'wp_snapshot_create': {
+      return await wpReq('/agency-os/v1/snapshot/create', {
+        method: 'POST',
+        body: { post_id: args.post_id, label: args.label || '' }
+      });
+    }
+
+    case 'wp_snapshot_list': {
+      return await wpReq(`/agency-os/v1/snapshot/list?post_id=${encodeURIComponent(args.post_id)}`);
+    }
+
+    case 'wp_snapshot_restore': {
+      return await wpReq('/agency-os/v1/snapshot/restore', {
+        method: 'POST',
+        body: { post_id: args.post_id, snapshot_id: args.snapshot_id }
+      });
+    }
+
+    case 'wp_publish_draft_over': {
+      return await wpReq('/agency-os/v1/publish-draft-over', {
+        method: 'POST',
+        body: { draft_id: args.draft_id, target_id: args.target_id }
+      });
+    }
+
+    case 'wp_replace_text': {
+      return await wpReq('/agency-os/v1/replace-text', {
+        method: 'POST',
+        body: {
+          post_id: args.post_id,
+          find: args.find,
+          replace: args.replace ?? '',
+          regex: args.regex === true,
+          case_insensitive: args.case_insensitive === true,
+          dry_run: args.dry_run === true
+        }
+      });
     }
 
     // ── MENUS ──
