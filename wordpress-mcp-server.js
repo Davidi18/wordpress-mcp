@@ -9,6 +9,15 @@ import fs from 'fs';
 import pg from 'pg';
 import { BLOCKS_MANIFEST, listBlocks, getBlock, parseElementorData, spliceBlock } from './elementor-blocks-library.js';
 import { buildGuidelines } from './elementor-guidelines.js';
+import {
+  requireApiKey,
+  readBodyWithLimit,
+  redactForLog,
+  fetchWithRetry,
+  DEFAULT_MAX_BODY_BYTES,
+  DEFAULT_FETCH_TIMEOUT_MS,
+  DEFAULT_FETCH_MAX_RETRIES
+} from './mcp-hardening.js';
 
 const PORT = parseInt(process.env.PORT || '8080');
 const API_KEY = process.env.API_KEY;
@@ -375,7 +384,7 @@ async function wpRequest(endpoint, options = {}) {
 
   const requestOptions = normalizeRequestOptions(options);
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     ...requestOptions,
     headers: {
       'Authorization': authHeader,
@@ -425,7 +434,7 @@ function createWpRequestForClient(clientConfig) {
 
     const requestOptions = normalizeRequestOptions(options);
 
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       ...requestOptions,
       headers: {
         'Authorization': authHeader,
@@ -4374,6 +4383,7 @@ const server = http.createServer(async (req, res) => {
 
   // GET /mcp — SSE fallback (mcporter uses this as fallback transport)
   if (req.method === 'GET' && req.url === '/mcp') {
+    if (!requireApiKey(req, res, API_KEY)) return;
     const sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -4411,10 +4421,26 @@ const server = http.createServer(async (req, res) => {
     }));
   }
 
+  // Enforce auth before parsing the body — covers initialize/tools/list/tools/call
+  if (!requireApiKey(req, res, API_KEY)) return;
+
   try {
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    const body = JSON.parse(Buffer.concat(chunks).toString());
+    let body;
+    try {
+      body = await readBodyWithLimit(req, DEFAULT_MAX_BODY_BYTES);
+    } catch (err) {
+      const status = err.statusCode || 400;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: status === 413 ? -32002 : -32700, message: err.message }
+      }));
+    }
+    if (!body) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Empty request body' }));
+    }
 
     const { method, params, id } = body;
 
@@ -4482,7 +4508,7 @@ const server = http.createServer(async (req, res) => {
 
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('🪵 TOOL CALL:', name);
-      console.log('📦 ARGS:', JSON.stringify(args, null, 2));
+      console.log('📦 ARGS:', JSON.stringify(redactForLog(args), null, 2));
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
       // Handle client parameter for multi-site
@@ -4558,7 +4584,9 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`📡 MCP Protocol: POST /mcp`);
   console.log(`🔍 HTTP API: GET /api/find?slug=...&client=...`);
   console.log(`📋 Clients: GET /api/clients`);
-  console.log(`🔐 API Key: ${API_KEY ? 'Enabled ✅' : 'Disabled ⚠️'}`);
+  console.log(`🔐 API Key: ${API_KEY ? 'Enabled ✅ (enforced on /mcp + /api/*)' : 'Disabled ⚠️'}`);
+  console.log(`📏 Max body: ${(DEFAULT_MAX_BODY_BYTES / 1024 / 1024).toFixed(0)} MB`);
+  console.log(`⏱️  WP fetch: ${DEFAULT_FETCH_TIMEOUT_MS}ms timeout, ${DEFAULT_FETCH_MAX_RETRIES}x retry on 429/5xx (GET only)`);
   console.log(`🗄️  Database: ${DATABASE_URL ? 'Configured' : 'Not configured (ENV fallback)'}`);
   console.log(`🛠️  Available MCP tools: ${tools.length}`);
 });
