@@ -8,6 +8,7 @@ import http from 'http';
 import fs from 'fs';
 import pg from 'pg';
 import { BLOCKS_MANIFEST, listBlocks, getBlock, parseElementorData, spliceBlock } from './elementor-blocks-library.js';
+import { buildGuidelines } from './elementor-guidelines.js';
 
 const PORT = parseInt(process.env.PORT || '8080');
 const API_KEY = process.env.API_KEY;
@@ -1553,6 +1554,17 @@ const tools = [
     }
   },
   {
+    name: 'wp_elementor_guidelines',
+    description: 'Return the site\'s Elementor design guidelines: color palette, typography, layout constants, and observed common patterns. Use this BEFORE creating/modifying widgets so new content matches the site\'s style instead of using default-ugly values. Pulls from the active Elementor Kit (Site Settings) and optionally analyzes recent pages.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        include_observed: { type: 'boolean', description: 'Also analyze recent pages to surface commonly-used colors/fonts/weights', default: true },
+        sample_size: { type: 'number', description: 'Number of recent pages to analyze for observed patterns', default: 10 }
+      }
+    }
+  },
+  {
     name: 'wp_elementor_insert_block',
     description: 'Insert a curated block into an existing page. Fetches the block, regenerates element ids to avoid collisions, and appends (or inserts at the given position) into the page _elementor_data. Use this instead of hand-writing widget JSON.',
     inputSchema: {
@@ -2300,6 +2312,13 @@ async function executeTool(name, args, clientConfig = null) {
 
     case 'wp_elementor_get_block': {
       return await getBlock(args.block_id);
+    }
+
+    case 'wp_elementor_guidelines': {
+      return await buildGuidelines(wpReq, {
+        include_observed: args.include_observed !== false,
+        sample_size: args.sample_size
+      });
     }
 
     case 'wp_elementor_insert_block': {
