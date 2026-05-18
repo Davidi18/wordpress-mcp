@@ -7,6 +7,8 @@
 import http from 'http';
 import fs from 'fs';
 import pg from 'pg';
+import { BLOCKS_MANIFEST, listBlocks, getBlock, parseElementorData, spliceBlock } from './elementor-blocks-library.js';
+import { buildGuidelines } from './elementor-guidelines.js';
 import {
   requireApiKey,
   readBodyWithLimit,
@@ -1539,6 +1541,51 @@ const tools = [
       required: ['id']
     }
   },
+  {
+    name: 'wp_elementor_list_blocks',
+    description: 'List curated, professionally-designed Elementor blocks/templates that can be inserted into a page. Use this BEFORE building a layout from scratch — pick a block here and insert it instead of hand-crafting widgets. Categories include: about, contact, homepage, landing-page, pricing, portfolio, coming-soon.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', description: 'Filter by category (about, contact, homepage, landing-page, pricing, portfolio, coming-soon)' }
+      }
+    }
+  },
+  {
+    name: 'wp_elementor_get_block',
+    description: 'Get the full Elementor JSON for a curated block by id (returned from wp_elementor_list_blocks). Use this to preview structure before inserting, or to extract sections for a custom composition.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        block_id: { type: 'string', description: 'Block id from wp_elementor_list_blocks (e.g. "obfx/contact-us")', required: true }
+      },
+      required: ['block_id']
+    }
+  },
+  {
+    name: 'wp_elementor_guidelines',
+    description: 'Return the site\'s Elementor design guidelines: color palette, typography, layout constants, and observed common patterns. Use this BEFORE creating/modifying widgets so new content matches the site\'s style instead of using default-ugly values. Pulls from the active Elementor Kit (Site Settings) and optionally analyzes recent pages.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        include_observed: { type: 'boolean', description: 'Also analyze recent pages to surface commonly-used colors/fonts/weights', default: true },
+        sample_size: { type: 'number', description: 'Number of recent pages to analyze for observed patterns', default: 10 }
+      }
+    }
+  },
+  {
+    name: 'wp_elementor_insert_block',
+    description: 'Insert a curated block into an existing page. Fetches the block, regenerates element ids to avoid collisions, and appends (or inserts at the given position) into the page _elementor_data. Use this instead of hand-writing widget JSON.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Target page id', required: true },
+        block_id: { type: 'string', description: 'Block id from wp_elementor_list_blocks', required: true },
+        position: { type: 'string', description: 'Insert position: "end" (default), "start", or a zero-based index as string', default: 'end' }
+      },
+      required: ['page_id', 'block_id']
+    }
+  },
 
   // ── MENUS ──
   {
@@ -2261,6 +2308,55 @@ async function executeTool(name, args, clientConfig = null) {
         title: r.title?.rendered || '',
         has_elementor_data: !!(r.meta?._elementor_data)
       }));
+    }
+
+    case 'wp_elementor_list_blocks': {
+      const blocks = listBlocks({ category: args.category });
+      return {
+        total: blocks.length,
+        categories: [...new Set(BLOCKS_MANIFEST.map(b => b.category))].sort(),
+        blocks
+      };
+    }
+
+    case 'wp_elementor_get_block': {
+      return await getBlock(args.block_id);
+    }
+
+    case 'wp_elementor_guidelines': {
+      return await buildGuidelines(wpReq, {
+        include_observed: args.include_observed !== false,
+        sample_size: args.sample_size
+      });
+    }
+
+    case 'wp_elementor_insert_block': {
+      const block = await getBlock(args.block_id);
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const currentSections = parseElementorData(page.meta?._elementor_data);
+
+      let position = args.position ?? 'end';
+      if (typeof position === 'string' && /^\d+$/.test(position)) {
+        position = parseInt(position, 10);
+      }
+
+      const merged = spliceBlock(currentSections, block.content, position);
+      const serialized = JSON.stringify(merged);
+
+      await wpReq(`/wp/v2/pages/${args.page_id}`, {
+        method: 'POST',
+        body: { meta: { _elementor_data: serialized } }
+      });
+
+      return {
+        inserted: true,
+        page_id: args.page_id,
+        block_id: args.block_id,
+        block_title: block.title,
+        sections_added: block.content.length,
+        total_sections: merged.length,
+        position
+      };
     }
 
     // ── MENUS ──
