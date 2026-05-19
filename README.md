@@ -9,7 +9,7 @@
 - 🔍 **`wp_replace_text`** — find/replace across post_content AND every Elementor widget text field (headings, buttons, editor HTML, captions, tab titles, testimonials, etc.). Supports regex, case-insensitive, and `dry_run` preview. Skips dynamic-tag fields.
 - 📦 **`wp_get_page_state`** — capture a normalized, restore-able state object before a multi-step edit.
 - ↩️ **`wp_restore_page_state`** — write a previously-captured state back onto a page. Verifies `_elementor_data` byte-length on restore.
-- 🧱 **Curated block library** — `wp_elementor_list_blocks` / `wp_elementor_get_block` / `wp_elementor_insert_block` let agents compose pages from vetted Elementor sections instead of hand-rolling JSON.
+- 🧱 **Curated block library — now two-tier** — local atomic sections (hero, features, testimonials, cta, faq, pricing, team) for section-by-section composition, plus full landing-page templates from Codeinwp/obfx-templates. Local blocks ship with `{{PLACEHOLDER}}` tokens; the agent fills them in via `wp_replace_text` after insertion.
 - 📐 **`wp_elementor_guidelines`** — surfaces the site's design tokens (typography, colors, spacing) so generated content matches the brand.
 - 🔐 **Hardened transport** — bearer-auth, body-size caps, log redaction, fetch timeout + retry with exponential backoff.
 
@@ -181,13 +181,30 @@
 - **`wp_elementor_update_from_file`** - Apply a saved Elementor JSON file to a page
 - **`wp_elementor_list_revisions`** - List WP revisions for a page (read-only — see note below)
 
-### Elementor Templates & Block Library (4 endpoints) ✨ v2.6
+### Elementor Templates & Block Library (6 endpoints) ✨ v2.6
 - **`wp_elementor_list_templates`** - List Elementor library templates on the site
 - **`wp_elementor_get_template`** - Read a single Elementor template
-- **`wp_elementor_list_blocks`** - List curated, vetted block presets (hero, features, CTA, testimonial, etc.) the agent can pick from instead of building Elementor JSON from scratch
-- **`wp_elementor_get_block`** - Get the JSON for one curated block (drop-in for `wp_elementor_insert_block`)
-- **`wp_elementor_insert_block`** - Insert a curated block at a given position in a target page
-- **`wp_elementor_guidelines`** - Return the site's design tokens (typography scale, color palette, spacing rules) — feed this to the agent before it composes a page
+- **`wp_elementor_list_blocks`** - List curated block presets. Two sources:
+  - `local` — atomic sections that ship in this repo (hero, features, testimonials, cta, faq, pricing, team). Each carries `{{PLACEHOLDER}}` tokens you replace post-insertion.
+  - `obfx` — 13 full landing-page templates fetched from Codeinwp/obfx-templates (archived, stable).
+  Filter via `category` and/or `source`.
+- **`wp_elementor_get_block`** - Get the JSON for one curated block. For local blocks the response includes a `placeholders` array listing every `{{PLACEHOLDER}}` token in the block.
+- **`wp_elementor_insert_block`** - Insert a curated block at a given position in a target page (regenerates element ids automatically, so the same block can be inserted multiple times).
+- **`wp_elementor_guidelines`** - Return the site's design tokens (typography scale, color palette, spacing rules) — feed this to the agent before it composes a page.
+
+**Local sections currently shipped** (8):
+| id | Category | Placeholders |
+|---|---|---|
+| `local/hero-centered` | hero | 4 |
+| `local/hero-split` | hero | 5 |
+| `local/features-3col` | features | 8 |
+| `local/testimonials-3col` | testimonials | 10 |
+| `local/cta-simple` | cta | 4 |
+| `local/faq-accordion` | faq | 9 |
+| `local/pricing-3col` | pricing | 23 |
+| `local/team-grid-3col` | team | 11 |
+
+Add more under `blocks/<slug>.json` and register them in `BLOCKS_MANIFEST` (see `elementor-blocks-library.js`).
 
 ### Control Plane (4 endpoints) ✨ NEW in v2.6!
 Stateless, pure-REST, no plugin install on the target site.
@@ -251,21 +268,39 @@ Build a redesign as a draft, verify it visually, then promote it on top of the l
 
 ### Compose a Page from Curated Blocks
 
-Instead of asking the agent to hand-author Elementor JSON, hand it the design system and a block library:
+Instead of asking the agent to hand-author Elementor JSON, hand it the design system and a block library. Use **local** atomic sections to compose a page section-by-section, then `wp_replace_text` to fill in the placeholder content:
 
 ```javascript
 // 1. Get the site's design tokens (colors, typography, spacing)
 { "tool": "wp_elementor_guidelines", "args": {} }
 
-// 2. List available block presets (hero, features, testimonial, CTA, etc.)
-{ "tool": "wp_elementor_list_blocks", "args": {} }
+// 2. List local atomic sections (or pass source:"obfx" for full landing pages)
+{ "tool": "wp_elementor_list_blocks", "args": { "source": "local" } }
 
-// 3. Create the page shell, then insert blocks one by one
-{ "tool": "wp_elementor_create_page", "args": { "title": "New Landing", "status": "draft" } }
+// 3. Preview one block — response includes a `placeholders` array
+//    listing every {{PLACEHOLDER}} token in the block
+{ "tool": "wp_elementor_get_block", "args": { "block_id": "local/hero-centered" } }
+// → { ..., placeholders: ["{{HERO_CTA}}", "{{HERO_CTA_URL}}",
+//                          "{{HERO_SUBTITLE}}", "{{HERO_TITLE}}"] }
+
+// 4. Create the page shell, then insert blocks one by one
+{ "tool": "wp_elementor_create_page",
+  "args": { "title": "New Landing", "status": "draft" } }   // → page_id
+
 { "tool": "wp_elementor_insert_block",
-  "args": { "page_id": 9123, "block_id": "hero_split", "position": 0 } }
+  "args": { "page_id": 9123, "block_id": "local/hero-centered", "position": 0 } }
 { "tool": "wp_elementor_insert_block",
-  "args": { "page_id": 9123, "block_id": "feature_grid_3col", "position": 1 } }
+  "args": { "page_id": 9123, "block_id": "local/features-3col", "position": 1 } }
+{ "tool": "wp_elementor_insert_block",
+  "args": { "page_id": 9123, "block_id": "local/cta-simple", "position": 2 } }
+
+// 5. Fill in the placeholders
+{ "tool": "wp_replace_text",
+  "args": { "post_id": 9123, "find": "{{HERO_TITLE}}", "replace": "Build faster" } }
+{ "tool": "wp_replace_text",
+  "args": { "post_id": 9123, "find": "{{HERO_SUBTITLE}}",
+            "replace": "The only deployment tool you'll ever need" } }
+// ... and so on for each placeholder
 ```
 
 ### Update Media Metadata

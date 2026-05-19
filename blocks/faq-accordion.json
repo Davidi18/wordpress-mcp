@@ -1,0 +1,61 @@
+{
+  "version": "0.4",
+  "title": "FAQ — Accordion",
+  "type": "section",
+  "content": [
+    {
+      "id": "faqsec",
+      "elType": "section",
+      "isInner": false,
+      "settings": {
+        "structure": "10",
+        "padding": { "unit": "px", "top": "80", "right": "20", "bottom": "80", "left": "20", "isLinked": false },
+        "content_width": { "unit": "px", "size": 900 }
+      },
+      "elements": [
+        {
+          "id": "faqcol",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 100, "_inline_size": null },
+          "elements": [
+            {
+              "id": "faqwgh",
+              "elType": "widget",
+              "widgetType": "heading",
+              "settings": {
+                "title": "{{FAQ_TITLE}}",
+                "header_size": "h2",
+                "align": "center",
+                "size": "xl"
+              },
+              "elements": []
+            },
+            {
+              "id": "faqsp",
+              "elType": "widget",
+              "widgetType": "spacer",
+              "settings": { "space": { "unit": "px", "size": 30 } },
+              "elements": []
+            },
+            {
+              "id": "faqacc",
+              "elType": "widget",
+              "widgetType": "accordion",
+              "settings": {
+                "title_html_tag": "h3",
+                "tabs": [
+                  { "_id": "faqt1", "tab_title": "{{FAQ_Q1}}", "tab_content": "<p>{{FAQ_A1}}</p>" },
+                  { "_id": "faqt2", "tab_title": "{{FAQ_Q2}}", "tab_content": "<p>{{FAQ_A2}}</p>" },
+                  { "_id": "faqt3", "tab_title": "{{FAQ_Q3}}", "tab_content": "<p>{{FAQ_A3}}</p>" },
+                  { "_id": "faqt4", "tab_title": "{{FAQ_Q4}}", "tab_content": "<p>{{FAQ_A4}}</p>" }
+                ]
+              },
+              "elements": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

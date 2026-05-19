@@ -1,0 +1,125 @@
+{
+  "version": "0.4",
+  "title": "Team — 3 members",
+  "type": "section",
+  "content": [
+    {
+      "id": "tg3sec1",
+      "elType": "section",
+      "isInner": false,
+      "settings": {
+        "structure": "10",
+        "padding": { "unit": "px", "top": "80", "right": "20", "bottom": "40", "left": "20", "isLinked": false }
+      },
+      "elements": [
+        {
+          "id": "tg3hcol",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 100, "_inline_size": null },
+          "elements": [
+            {
+              "id": "tg3wgh",
+              "elType": "widget",
+              "widgetType": "heading",
+              "settings": {
+                "title": "{{TEAM_TITLE}}",
+                "header_size": "h2",
+                "align": "center",
+                "size": "xl"
+              },
+              "elements": []
+            },
+            {
+              "id": "tg3wgs",
+              "elType": "widget",
+              "widgetType": "text-editor",
+              "settings": {
+                "editor": "<p style=\"text-align: center;\">{{TEAM_SUBTITLE}}</p>"
+              },
+              "elements": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tg3sec2",
+      "elType": "section",
+      "isInner": false,
+      "settings": {
+        "structure": "30",
+        "padding": { "unit": "px", "top": "20", "right": "20", "bottom": "80", "left": "20", "isLinked": false },
+        "gap": "extended"
+      },
+      "elements": [
+        {
+          "id": "tg3col1",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 33, "_inline_size": null },
+          "elements": [
+            {
+              "id": "tg3ib1",
+              "elType": "widget",
+              "widgetType": "image-box",
+              "settings": {
+                "image": { "url": "{{TEAM_1_IMAGE_URL}}", "id": "" },
+                "image_size": "medium",
+                "title_text": "{{TEAM_1_NAME}}",
+                "description_text": "{{TEAM_1_ROLE}}",
+                "position": "top",
+                "title_size": "h4"
+              },
+              "elements": []
+            }
+          ]
+        },
+        {
+          "id": "tg3col2",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 33, "_inline_size": null },
+          "elements": [
+            {
+              "id": "tg3ib2",
+              "elType": "widget",
+              "widgetType": "image-box",
+              "settings": {
+                "image": { "url": "{{TEAM_2_IMAGE_URL}}", "id": "" },
+                "image_size": "medium",
+                "title_text": "{{TEAM_2_NAME}}",
+                "description_text": "{{TEAM_2_ROLE}}",
+                "position": "top",
+                "title_size": "h4"
+              },
+              "elements": []
+            }
+          ]
+        },
+        {
+          "id": "tg3col3",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 33, "_inline_size": null },
+          "elements": [
+            {
+              "id": "tg3ib3",
+              "elType": "widget",
+              "widgetType": "image-box",
+              "settings": {
+                "image": { "url": "{{TEAM_3_IMAGE_URL}}", "id": "" },
+                "image_size": "medium",
+                "title_text": "{{TEAM_3_NAME}}",
+                "description_text": "{{TEAM_3_ROLE}}",
+                "position": "top",
+                "title_size": "h4"
+              },
+              "elements": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
