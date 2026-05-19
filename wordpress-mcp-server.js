@@ -9,6 +9,7 @@ import fs from 'fs';
 import pg from 'pg';
 import { BLOCKS_MANIFEST, listBlocks, getBlock, parseElementorData, spliceBlock } from './elementor-blocks-library.js';
 import { buildGuidelines } from './elementor-guidelines.js';
+import { applyReplaceText, walkElementorReplace } from './elementor-replace-text.js';
 import {
   requireApiKey,
   readBodyWithLimit,
@@ -1587,69 +1588,49 @@ const tools = [
     }
   },
 
-  // ── CONTROL PLANE (snapshots / publish / replace) ──
-  // Requires the `agency-os-control-plane.php` mu-plugin installed on the site.
-  {
-    name: 'wp_snapshot_create',
-    description: 'Take a snapshot of a post/page (title, content, status, _elementor_data). Stored in postmeta, auto-pruned to the newest 5. Use this BEFORE any risky edit so you can roll back with wp_snapshot_restore.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        post_id: { type: 'number', description: 'Post or page id to snapshot' },
-        label: { type: 'string', description: 'Optional human-readable label (e.g. "before hero rewrite")' }
-      },
-      required: ['post_id']
-    }
-  },
-  {
-    name: 'wp_snapshot_list',
-    description: 'List all snapshots stored for a post/page, newest first. Returns snapshot_id, ts, date, label, post_status, elementor_bytes.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        post_id: { type: 'number', description: 'Post or page id' }
-      },
-      required: ['post_id']
-    }
-  },
-  {
-    name: 'wp_snapshot_restore',
-    description: 'Restore a post/page from a snapshot. Automatically takes a fresh snapshot of the current state first (labeled "pre-restore:...") so you can undo the undo. Returns verified=true if bytes match.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        post_id: { type: 'number', description: 'Post or page id to restore' },
-        snapshot_id: { type: 'string', description: 'Snapshot id from wp_snapshot_list' }
-      },
-      required: ['post_id', 'snapshot_id']
-    }
-  },
+  // ── CONTROL PLANE (publish-draft-over / replace-text / revisions-restore) ──
+  // Pure REST — no plugin installation on the WordPress site required.
+  // Rollback is provided by WordPress's native revision system: every write
+  // here auto-creates a revision of the pre-write state, restorable via
+  // wp_elementor_list_revisions + wp_revisions_restore.
   {
     name: 'wp_publish_draft_over',
-    description: 'Promote a draft on top of an existing canonical post: snapshot the target, copy title/content/_elementor_data from draft into target (preserving target id, URL, and post_status), then permanently delete the draft. Use this to ship a redesign without changing the live page id/URL.',
+    description: 'Promote a draft on top of an existing canonical page: copy title/content/_elementor_data from the draft into the target page (preserving target id, URL, and status), verify the write, then permanently delete the draft. WordPress auto-creates a revision of the pre-publish target — use wp_elementor_list_revisions + wp_revisions_restore to roll back if needed. Use this to ship a redesign without changing the live URL.',
     inputSchema: {
       type: 'object',
       properties: {
-        draft_id: { type: 'number', description: 'Source draft post id (will be deleted)' },
-        target_id: { type: 'number', description: 'Live target post id (will be overwritten with draft content)' }
+        draft_id: { type: 'number', description: 'Source draft page id (will be deleted on success)' },
+        target_id: { type: 'number', description: 'Live target page id (will be overwritten with draft content)' }
       },
       required: ['draft_id', 'target_id']
     }
   },
   {
     name: 'wp_replace_text',
-    description: 'Bulk find/replace across a post: post_content + Elementor widget text fields (title, editor HTML, button text, descriptions, captions, tab titles, testimonials, etc.). Skips dynamic-tag fields. Defaults to literal case-sensitive match; set regex=true or case_insensitive=true to change. Use dry_run=true to preview matches without writing. Auto-snapshots before any write.',
+    description: 'Bulk find/replace across a page: post_content + Elementor widget text fields (title, editor HTML, button text, descriptions, captions, tab titles, testimonials, etc.). Skips dynamic-tag fields. Defaults to literal case-sensitive match; set regex=true or case_insensitive=true. Use dry_run=true to preview matches without writing. The write auto-creates a WP revision for rollback (wp_elementor_list_revisions → wp_revisions_restore).',
     inputSchema: {
       type: 'object',
       properties: {
-        post_id: { type: 'number', description: 'Post or page id' },
-        find: { type: 'string', description: 'String to find (or regex pattern if regex=true)' },
+        post_id: { type: 'number', description: 'Page id' },
+        find: { type: 'string', description: 'String to find (or regex pattern body if regex=true)' },
         replace: { type: 'string', description: 'Replacement string (default empty = deletion)', default: '' },
-        regex: { type: 'boolean', description: 'Treat `find` as a PCRE regex pattern (without delimiters)', default: false },
+        regex: { type: 'boolean', description: 'Treat `find` as a JS regex pattern (without delimiters or flags)', default: false },
         case_insensitive: { type: 'boolean', description: 'Match case-insensitively', default: false },
         dry_run: { type: 'boolean', description: 'Report matches without writing', default: false }
       },
       required: ['post_id', 'find']
+    }
+  },
+  {
+    name: 'wp_revisions_restore',
+    description: 'Restore a page from one of its WordPress revisions (listed via wp_elementor_list_revisions). Copies the revision\'s title/content/_elementor_data onto the parent page. This write itself creates a new revision of the pre-restore state, so the restore is reversible.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Parent page id' },
+        revision_id: { type: 'number', description: 'Revision id from wp_elementor_list_revisions' }
+      },
+      required: ['page_id', 'revision_id']
     }
   },
 
@@ -2426,44 +2407,175 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     // ── CONTROL PLANE ──
-    // All endpoints provided by agency-os-control-plane.php mu-plugin.
-    case 'wp_snapshot_create': {
-      return await wpReq('/agency-os/v1/snapshot/create', {
-        method: 'POST',
-        body: { post_id: args.post_id, label: args.label || '' }
-      });
-    }
-
-    case 'wp_snapshot_list': {
-      return await wpReq(`/agency-os/v1/snapshot/list?post_id=${encodeURIComponent(args.post_id)}`);
-    }
-
-    case 'wp_snapshot_restore': {
-      return await wpReq('/agency-os/v1/snapshot/restore', {
-        method: 'POST',
-        body: { post_id: args.post_id, snapshot_id: args.snapshot_id }
-      });
-    }
-
+    // Pure REST — no plugin required on the WP site.
+    // WordPress's native auto-revisioning provides rollback for every write.
     case 'wp_publish_draft_over': {
-      return await wpReq('/agency-os/v1/publish-draft-over', {
-        method: 'POST',
-        body: { draft_id: args.draft_id, target_id: args.target_id }
-      });
+      const draftId = args.draft_id;
+      const targetId = args.target_id;
+      if (!draftId || !targetId) throw new Error('draft_id and target_id required');
+      if (draftId === targetId) throw new Error('draft_id and target_id must differ');
+
+      const draft = await wpReq(`/wp/v2/pages/${draftId}?context=edit`);
+      if (!draft || !draft.id) throw new Error(`Draft page ${draftId} not found`);
+      const target = await wpReq(`/wp/v2/pages/${targetId}?context=edit&_fields=id,status`);
+      if (!target || !target.id) throw new Error(`Target page ${targetId} not found`);
+
+      const draftElementor = draft.meta?._elementor_data;
+      const elementorString = typeof draftElementor === 'string'
+        ? draftElementor
+        : (draftElementor != null ? JSON.stringify(draftElementor) : '');
+
+      const payload = {
+        title: draft.title?.raw ?? draft.title?.rendered ?? '',
+        content: draft.content?.raw ?? draft.content?.rendered ?? ''
+      };
+      if (draftElementor !== undefined) {
+        payload.meta = { _elementor_data: elementorString };
+      }
+
+      await wpReq(`/wp/v2/pages/${targetId}`, { method: 'POST', body: payload });
+
+      const verify = await wpReq(`/wp/v2/pages/${targetId}?context=edit&_fields=id,meta`);
+      const verifyBytes = typeof verify?.meta?._elementor_data === 'string'
+        ? verify.meta._elementor_data.length
+        : 0;
+      const verified = draftElementor === undefined ? true : verifyBytes === elementorString.length;
+
+      if (!verified) {
+        throw new Error(
+          `Verify failed: wrote ${elementorString.length} bytes of _elementor_data but read back ${verifyBytes}. ` +
+          `Draft ${draftId} NOT deleted. Restore target from revisions via wp_elementor_list_revisions if needed.`
+        );
+      }
+
+      await wpReq(`/wp/v2/pages/${draftId}?force=true`, { method: 'DELETE' });
+
+      return {
+        published: true,
+        target_id: targetId,
+        deleted_draft_id: draftId,
+        verified: true,
+        elementor_bytes: verifyBytes,
+        rollback_hint: `Pre-publish state is the latest revision on page ${targetId}. List with wp_elementor_list_revisions and restore with wp_revisions_restore.`
+      };
     }
 
     case 'wp_replace_text': {
-      return await wpReq('/agency-os/v1/replace-text', {
-        method: 'POST',
-        body: {
-          post_id: args.post_id,
-          find: args.find,
-          replace: args.replace ?? '',
-          regex: args.regex === true,
-          case_insensitive: args.case_insensitive === true,
-          dry_run: args.dry_run === true
+      const postId = args.post_id;
+      const find = args.find;
+      const replace = args.replace ?? '';
+      const regex = args.regex === true;
+      const ci = args.case_insensitive === true;
+      const dryRun = args.dry_run === true;
+
+      if (!postId || typeof find !== 'string' || find === '') {
+        throw new Error('post_id and non-empty find required');
+      }
+
+      const page = await wpReq(`/wp/v2/pages/${postId}?context=edit`);
+      if (!page || !page.id) throw new Error(`Page ${postId} not found`);
+
+      const counter = { replacements: 0, fields: {} };
+
+      const contentRaw = page.content?.raw ?? '';
+      const [newContent, contentHits] = applyReplaceText(contentRaw, find, replace, regex, ci);
+      if (contentHits > 0) {
+        counter.replacements += contentHits;
+        counter.fields.post_content = contentHits;
+      }
+
+      const rawElementor = page.meta?._elementor_data;
+      let newElementorString = null;
+      let elementorChanged = false;
+      if (typeof rawElementor === 'string' && rawElementor !== '') {
+        let tree;
+        try { tree = JSON.parse(rawElementor); } catch { tree = null; }
+        if (Array.isArray(tree)) {
+          walkElementorReplace(tree, find, replace, regex, ci, counter);
+          newElementorString = JSON.stringify(tree);
+          elementorChanged = newElementorString !== rawElementor;
         }
-      });
+      }
+
+      if (dryRun || counter.replacements === 0) {
+        return {
+          dry_run: dryRun,
+          applied: false,
+          post_id: postId,
+          matches: counter.replacements,
+          fields: counter.fields,
+          would_change: {
+            post_content: contentHits > 0,
+            elementor_data: elementorChanged
+          }
+        };
+      }
+
+      const writePayload = {};
+      if (contentHits > 0) writePayload.content = newContent;
+      if (elementorChanged) writePayload.meta = { _elementor_data: newElementorString };
+      await wpReq(`/wp/v2/pages/${postId}`, { method: 'POST', body: writePayload });
+
+      const after = await wpReq(`/wp/v2/pages/${postId}?context=edit&_fields=id,meta`);
+      const afterBytes = typeof after?.meta?._elementor_data === 'string'
+        ? after.meta._elementor_data.length
+        : 0;
+      const expectedBytes = elementorChanged
+        ? newElementorString.length
+        : (typeof rawElementor === 'string' ? rawElementor.length : 0);
+
+      return {
+        applied: true,
+        post_id: postId,
+        matches: counter.replacements,
+        fields: counter.fields,
+        content_changed: contentHits > 0,
+        elementor_changed: elementorChanged,
+        verified: afterBytes === expectedBytes,
+        elementor_bytes: afterBytes,
+        rollback_hint: `Pre-replace state is the latest revision on page ${postId}.`
+      };
+    }
+
+    case 'wp_revisions_restore': {
+      const pageId = args.page_id;
+      const revisionId = args.revision_id;
+      if (!pageId || !revisionId) throw new Error('page_id and revision_id required');
+
+      const revision = await wpReq(`/wp/v2/pages/${pageId}/revisions/${revisionId}?context=edit`);
+      if (!revision || !revision.id) {
+        throw new Error(`Revision ${revisionId} not found for page ${pageId}`);
+      }
+
+      const elementorData = revision.meta?._elementor_data;
+      const elementorString = typeof elementorData === 'string'
+        ? elementorData
+        : (elementorData != null ? JSON.stringify(elementorData) : null);
+
+      const payload = {
+        title: revision.title?.raw ?? revision.title?.rendered ?? '',
+        content: revision.content?.raw ?? revision.content?.rendered ?? ''
+      };
+      if (elementorString !== null) {
+        payload.meta = { _elementor_data: elementorString };
+      }
+
+      await wpReq(`/wp/v2/pages/${pageId}`, { method: 'POST', body: payload });
+
+      const after = await wpReq(`/wp/v2/pages/${pageId}?context=edit&_fields=id,meta`);
+      const afterBytes = typeof after?.meta?._elementor_data === 'string'
+        ? after.meta._elementor_data.length
+        : 0;
+      const verified = elementorString === null ? true : afterBytes === elementorString.length;
+
+      return {
+        restored: true,
+        page_id: pageId,
+        revision_id: revisionId,
+        verified,
+        elementor_bytes: afterBytes,
+        rollback_hint: `The pre-restore state is now itself the latest revision on page ${pageId}.`
+      };
     }
 
     // ── MENUS ──
