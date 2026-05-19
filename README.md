@@ -1,8 +1,19 @@
-# WordPress MCP Server v2.5 - Enhanced Edition with WooCommerce Support
+# WordPress MCP Server v2.6 - Elementor Control Plane
 
-## 🎉 What's New in v2.5
+## 🎉 What's New in v2.6
 
-**NEW: Full WooCommerce Support** - Manage products, categories, variations, and orders!
+**NEW: Pure-REST Control Plane for Elementor** — agents can ship redesigns and bulk-edit text across any client's Elementor pages without installing a single line of PHP on the target site. Stateless, REST-only, and verified byte-for-byte on every write.
+
+### v2.6 Features:
+- 🎯 **`wp_publish_draft_over`** — promote a draft on top of a live page: copies title, content, `_elementor_data`, page settings, featured image, Yoast/RankMath SEO, excerpt, template, menu_order (and optionally taxonomies) into the target. Live URL/ID are preserved. Draft is deleted on verified write.
+- 🔍 **`wp_replace_text`** — find/replace across post_content AND every Elementor widget text field (headings, buttons, editor HTML, captions, tab titles, testimonials, etc.). Supports regex, case-insensitive, and `dry_run` preview. Skips dynamic-tag fields.
+- 📦 **`wp_get_page_state`** — capture a normalized, restore-able state object before a multi-step edit.
+- ↩️ **`wp_restore_page_state`** — write a previously-captured state back onto a page. Verifies `_elementor_data` byte-length on restore.
+- 🧱 **Curated block library** — `wp_elementor_list_blocks` / `wp_elementor_get_block` / `wp_elementor_insert_block` let agents compose pages from vetted Elementor sections instead of hand-rolling JSON.
+- 📐 **`wp_elementor_guidelines`** — surfaces the site's design tokens (typography, colors, spacing) so generated content matches the brand.
+- 🔐 **Hardened transport** — bearer-auth, body-size caps, log redaction, fetch timeout + retry with exponential backoff.
+
+**Why this matters**: rollback no longer relies on WordPress revisions. Empirical tests on multiple live sites confirmed that the WP REST revision endpoint does not expose `_elementor_data` — so revisions can't restore Elementor pages, full stop. v2.6 sidesteps this by returning the full pre-write `previous_state` in every destructive op. The caller keeps it, the caller restores when needed. Zero state at the MCP server, zero state at the WP site.
 
 ### v2.5 Features:
 - 🛒 **WooCommerce Products** - Full CRUD for products with images, stock, pricing
@@ -168,9 +179,102 @@
 - **`wc_get_order`** - Get full order details
 - **`wc_update_order`** - Update order status
 
+### Elementor Pages (8 endpoints) ✨ v2.6
+- **`wp_elementor_get_page`** - Read a page's `_elementor_data` (parsed sections + page settings)
+- **`wp_elementor_get_page_by_slug`** - Same, by slug instead of id
+- **`wp_elementor_create_page`** - Create a page with Elementor data in one call
+- **`wp_elementor_update_page`** - Update a page's Elementor data
+- **`wp_elementor_delete_page`** - Delete an Elementor page
+- **`wp_elementor_download_page`** - Export Elementor data to disk
+- **`wp_elementor_update_from_file`** - Apply a saved Elementor JSON file to a page
+- **`wp_elementor_list_revisions`** - List WP revisions for a page (read-only — see note below)
+
+### Elementor Templates & Block Library (4 endpoints) ✨ v2.6
+- **`wp_elementor_list_templates`** - List Elementor library templates on the site
+- **`wp_elementor_get_template`** - Read a single Elementor template
+- **`wp_elementor_list_blocks`** - List curated, vetted block presets (hero, features, CTA, testimonial, etc.) the agent can pick from instead of building Elementor JSON from scratch
+- **`wp_elementor_get_block`** - Get the JSON for one curated block (drop-in for `wp_elementor_insert_block`)
+- **`wp_elementor_insert_block`** - Insert a curated block at a given position in a target page
+- **`wp_elementor_guidelines`** - Return the site's design tokens (typography scale, color palette, spacing rules) — feed this to the agent before it composes a page
+
+### Control Plane (4 endpoints) ✨ NEW in v2.6!
+Stateless, pure-REST, no plugin install on the target site.
+- **`wp_publish_draft_over`** - Promote a draft on top of a live page (preserves target id/URL/status). Copies content, Elementor data, page settings, featured media, SEO meta, taxonomies. Verifies the write, then deletes the draft. Returns `previous_state` for rollback.
+- **`wp_replace_text`** - Bulk find/replace across post_content + Elementor widget text. Supports regex, case-insensitive, `dry_run`. Skips `__dynamic__` fields. Returns `previous_state`.
+- **`wp_get_page_state`** - Read a page and return a normalized restore-able state object (title, content, excerpt, template, menu_order, featured_media, captured meta).
+- **`wp_restore_page_state`** - Write a state object back onto a page. Pair with `previous_state` from a destructive op, or with the output of `wp_get_page_state`.
+
+> ⚠️ **Rollback note**: WordPress's REST revision endpoint does not return the `meta` field, so `_elementor_data` is **not** preserved in REST-visible revisions — verified on multiple live sites. Do NOT rely on `wp_elementor_list_revisions` for Elementor rollback. Use `previous_state` / `wp_restore_page_state` instead.
+
 ---
 
 ## 🚀 Usage Examples
+
+### Bulk Text Replace with Rollback (Control Plane)
+
+Replace text across a page's Elementor widgets and keep a rollback handle:
+
+```javascript
+// 1. Preview first — see what would change without writing
+{ "tool": "wp_replace_text",
+  "args": { "post_id": 2719, "find": "HELLO_AAA", "replace": "GOODBYE_AAA", "dry_run": true } }
+// → { applied: false, matches: 1, would_change: { post_content: false, elementor_data: true } }
+
+// 2. Apply for real — receive previous_state
+{ "tool": "wp_replace_text",
+  "args": { "post_id": 2719, "find": "HELLO_AAA", "replace": "GOODBYE_AAA" } }
+// → { applied: true, verified: true, matches: 1,
+//     previous_state: { post_id, title, content, excerpt, template, meta: { _elementor_data: "..." } },
+//     elementor_bytes: 326 }
+
+// 3. (Optional) If something's wrong, hand previous_state back:
+{ "tool": "wp_restore_page_state",
+  "args": { "post_id": 2719, "state": /* the previous_state from step 2 */ } }
+// → { restored: true, verified: true, elementor_bytes: 324 }
+```
+
+The caller (agent or workflow) decides whether to keep `previous_state` in memory, persist it to n8n state, or store it in its own DB. The MCP server keeps none of it.
+
+### Promote a Redesign Draft Over the Live Page
+
+Build a redesign as a draft, verify it visually, then promote it on top of the live page in a single call — preserving the live URL, page id, and post status:
+
+```javascript
+{ "tool": "wp_publish_draft_over",
+  "args": {
+    "draft_id": 9123,            // the redesign you've been building
+    "target_id": 2715,           // the live page to overwrite
+    "copy_seo": true,            // copy Yoast + RankMath meta from the draft
+    "copy_featured_image": true,
+    "copy_taxonomies": false     // opt-in: also sync categories/tags/custom tax
+  } }
+// → { published: true, deleted_draft_id: 9123, target_id: 2715,
+//     verified: true, elementor_bytes: 184273,
+//     copied: { featured_image: true, template: true, menu_order: true,
+//               excerpt: true, meta_keys: [...], taxonomies: [] },
+//     previous_state: { ... } }
+```
+
+`previous_state` is the live page exactly as it was before the publish — pass it to `wp_restore_page_state` if the redesign needs to be rolled back.
+
+### Compose a Page from Curated Blocks
+
+Instead of asking the agent to hand-author Elementor JSON, hand it the design system and a block library:
+
+```javascript
+// 1. Get the site's design tokens (colors, typography, spacing)
+{ "tool": "wp_elementor_guidelines", "args": {} }
+
+// 2. List available block presets (hero, features, testimonial, CTA, etc.)
+{ "tool": "wp_elementor_list_blocks", "args": {} }
+
+// 3. Create the page shell, then insert blocks one by one
+{ "tool": "wp_elementor_create_page", "args": { "title": "New Landing", "status": "draft" } }
+{ "tool": "wp_elementor_insert_block",
+  "args": { "page_id": 9123, "block_id": "hero_split", "position": 0 } }
+{ "tool": "wp_elementor_insert_block",
+  "args": { "page_id": 9123, "block_id": "feature_grid_3col", "position": 1 } }
+```
 
 ### Update Media Metadata
 ```javascript
@@ -1120,7 +1224,31 @@ npm start
 
 ## 📝 Changelog
 
-### v2.5.0 (Latest)
+### v2.6.0 (Latest)
+
+#### Added
+- 🎯 **Elementor Control Plane** — pure-REST, stateless, no plugin install on target sites
+  - `wp_publish_draft_over` — promote a draft over a live page (preserves id/URL/status); copies content, `_elementor_data`, page settings, featured image, Yoast + RankMath SEO, excerpt, template, menu_order, optional taxonomies; verifies the write byte-for-byte; deletes draft on success; returns `previous_state` for rollback
+  - `wp_replace_text` — bulk find/replace across `post_content` and every Elementor widget text field (heading, button, editor HTML, captions, tabs, testimonials, etc.); supports regex, case-insensitive, and `dry_run`; skips `__dynamic__` fields; returns `previous_state`
+  - `wp_get_page_state` — capture a normalized restore-able state object
+  - `wp_restore_page_state` — write a state object back onto a page; verifies `_elementor_data` byte-length
+- 🧱 **Curated Elementor Block Library**
+  - `wp_elementor_list_blocks` / `wp_elementor_get_block` / `wp_elementor_insert_block` — agents pick from vetted block presets instead of authoring Elementor JSON from scratch
+- 📐 `wp_elementor_guidelines` — return the site's design tokens (typography, colors, spacing) so generated content stays on-brand
+- 📄 **Elementor Page Ops**
+  - `wp_elementor_get_page` / `wp_elementor_get_page_by_slug` / `wp_elementor_create_page` / `wp_elementor_update_page` / `wp_elementor_delete_page` / `wp_elementor_download_page` / `wp_elementor_update_from_file`
+  - `wp_elementor_list_templates` / `wp_elementor_get_template`
+  - `wp_elementor_list_revisions` (read-only — see note)
+- 🔐 **Transport hardening** — bearer auth on the HTTP API, request body size cap, secret redaction in logs, fetch timeout + retry with exponential backoff
+
+#### Removed
+- ❌ `wp_revisions_restore` — WP REST does not expose `meta` (and therefore `_elementor_data`) in revision responses; rollback via revisions is impossible without a server-side PHP plugin. Verified on multiple live sites. Replaced by the stateless `previous_state` + `wp_restore_page_state` flow.
+
+#### Improved
+- Centralized Elementor + SEO meta-key lists in `wp-meta-keys.js` (previously inlined per case handler)
+- Canonical state extractor (`extractPageState`) and payload builder (`statePayload`) shared by all four control-plane tools
+
+### v2.5.0
 
 #### Added
 - 🛒 **WooCommerce Support** - Full product management via MCP
