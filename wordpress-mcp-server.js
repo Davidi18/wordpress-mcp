@@ -10,6 +10,7 @@ import pg from 'pg';
 import { BLOCKS_MANIFEST, listBlocks, getBlock, parseElementorData, spliceBlock } from './elementor-blocks-library.js';
 import { buildGuidelines } from './elementor-guidelines.js';
 import { applyReplaceText, walkElementorReplace } from './elementor-replace-text.js';
+import { ELEMENTOR_META_KEYS, SEO_META_KEYS, POST_NON_TAX_FIELDS } from './wp-meta-keys.js';
 import {
   requireApiKey,
   readBodyWithLimit,
@@ -458,6 +459,56 @@ function createWpRequestForClient(clientConfig) {
 
     return data;
   };
+}
+
+// Extract a normalized, restore-able state object from a page fetched via
+// /wp/v2/pages/{id}?context=edit. Used by wp_publish_draft_over and
+// wp_replace_text to return `previous_state`, and by wp_get_page_state /
+// wp_restore_page_state as the canonical state shape.
+function extractPageState(page) {
+  if (!page || typeof page !== 'object') return null;
+  const meta = {};
+  for (const key of [...ELEMENTOR_META_KEYS, ...SEO_META_KEYS]) {
+    if (page.meta && page.meta[key] !== undefined) meta[key] = page.meta[key];
+  }
+  // Normalize _elementor_data to a string (Elementor stores it as a JSON
+  // string in postmeta; some REST consumers return it parsed).
+  if (meta._elementor_data !== undefined && typeof meta._elementor_data !== 'string') {
+    meta._elementor_data = meta._elementor_data == null ? '' : JSON.stringify(meta._elementor_data);
+  }
+  return {
+    post_id: page.id,
+    title: page.title?.raw ?? page.title?.rendered ?? '',
+    content: page.content?.raw ?? page.content?.rendered ?? '',
+    excerpt: page.excerpt?.raw ?? '',
+    status: page.status ?? '',
+    template: page.template ?? '',
+    menu_order: typeof page.menu_order === 'number' ? page.menu_order : 0,
+    featured_media: page.featured_media ?? null,
+    meta
+  };
+}
+
+// Build a /wp/v2/pages/{id} POST payload from a normalized state object.
+// Skips empty/null meta values so they don't overwrite live fields with blanks.
+function statePayload(state) {
+  const payload = {
+    title: state.title ?? '',
+    content: state.content ?? '',
+    excerpt: state.excerpt ?? ''
+  };
+  if (state.template !== undefined && state.template !== null) payload.template = state.template;
+  if (typeof state.menu_order === 'number') payload.menu_order = state.menu_order;
+  if (state.featured_media != null) payload.featured_media = state.featured_media;
+  if (state.meta && typeof state.meta === 'object') {
+    const meta = {};
+    for (const [k, v] of Object.entries(state.meta)) {
+      if (v === '' || v === null) continue;
+      meta[k] = (k === '_elementor_data' && typeof v !== 'string') ? JSON.stringify(v) : v;
+    }
+    if (Object.keys(meta).length > 0) payload.meta = meta;
+  }
+  return payload;
 }
 
 const tools = [
@@ -1588,14 +1639,13 @@ const tools = [
     }
   },
 
-  // ── CONTROL PLANE (publish-draft-over / replace-text / revisions-restore) ──
+  // ── CONTROL PLANE (publish-draft-over / replace-text / restore-page-state) ──
   // Pure REST — no plugin installation on the WordPress site required.
-  // Rollback is provided by WordPress's native revision system: every write
-  // here auto-creates a revision of the pre-write state, restorable via
-  // wp_elementor_list_revisions + wp_revisions_restore.
+  // Stateless: destructive ops return a full `previous_state` in their response
+  // so the caller can pass it back to wp_restore_page_state for rollback.
   {
     name: 'wp_publish_draft_over',
-    description: 'Promote a draft on top of an existing canonical page: copy title/content/_elementor_data plus (by default) Elementor page settings, featured image, SEO meta (Yoast + RankMath), excerpt, template, and menu_order from the draft into the target page (preserving target id, URL, and status). Verifies the write, then permanently deletes the draft. WordPress auto-creates a revision of the pre-publish target — use wp_elementor_list_revisions + wp_revisions_restore to roll back. Use this to ship a redesign without changing the live URL.',
+    description: 'Promote a draft on top of an existing canonical page: copy title/content/_elementor_data plus (by default) Elementor page settings, featured image, SEO meta (Yoast + RankMath), excerpt, template, and menu_order from the draft into the target page (preserving target id, URL, and status). Verifies the write, then permanently deletes the draft. Returns `previous_state` (the target\'s pre-write state) — hold on to it if you want to roll back via wp_restore_page_state. Use this to ship a redesign without changing the live URL.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1611,7 +1661,7 @@ const tools = [
   },
   {
     name: 'wp_replace_text',
-    description: 'Bulk find/replace across a page: post_content + Elementor widget text fields (title, editor HTML, button text, descriptions, captions, tab titles, testimonials, etc.). Skips dynamic-tag fields. Defaults to literal case-sensitive match; set regex=true or case_insensitive=true. Use dry_run=true to preview matches without writing. The write auto-creates a WP revision for rollback (wp_elementor_list_revisions → wp_revisions_restore).',
+    description: 'Bulk find/replace across a page: post_content + Elementor widget text fields (title, editor HTML, button text, descriptions, captions, tab titles, testimonials, etc.). Skips dynamic-tag fields. Defaults to literal case-sensitive match; set regex=true or case_insensitive=true. Use dry_run=true to preview matches without writing. On a real (non-dry) write, returns `previous_state` (the page\'s pre-write state) — hold on to it for rollback via wp_restore_page_state.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1626,15 +1676,26 @@ const tools = [
     }
   },
   {
-    name: 'wp_revisions_restore',
-    description: 'Restore a page from one of its WordPress revisions (listed via wp_elementor_list_revisions). Copies the revision\'s title/content/_elementor_data onto the parent page. This write itself creates a new revision of the pre-restore state, so the restore is reversible.',
+    name: 'wp_get_page_state',
+    description: 'Read a page and return a normalized, restore-able `state` object — exactly the shape that wp_restore_page_state accepts. Use this to capture a baseline before a multi-step edit you want to be able to undo.',
     inputSchema: {
       type: 'object',
       properties: {
-        page_id: { type: 'number', description: 'Parent page id' },
-        revision_id: { type: 'number', description: 'Revision id from wp_elementor_list_revisions' }
+        post_id: { type: 'number', description: 'Page id to capture' }
       },
-      required: ['page_id', 'revision_id']
+      required: ['post_id']
+    }
+  },
+  {
+    name: 'wp_restore_page_state',
+    description: 'Write a previously-captured `state` object back onto a page. Restores title, content, excerpt, template, menu_order, featured_media, and the captured meta (Elementor + SEO keys). Verifies _elementor_data byte-length matches the input. Pair with `previous_state` returned by wp_publish_draft_over / wp_replace_text, or with the output of wp_get_page_state.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        post_id: { type: 'number', description: 'Page id to restore onto (authoritative — overrides state.post_id)' },
+        state: { type: 'object', description: 'State object: { title, content, excerpt, template, menu_order, featured_media, meta: { ... } }' }
+      },
+      required: ['post_id', 'state']
     }
   },
 
@@ -2411,42 +2472,9 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     // ── CONTROL PLANE ──
-    // Pure REST — no plugin required on the WP site.
-    // WordPress's native auto-revisioning provides rollback for every write.
+    // Pure REST, stateless. Destructive ops return `previous_state` so the
+    // caller can pass it back to wp_restore_page_state to roll back.
     case 'wp_publish_draft_over': {
-      const ELEMENTOR_META_KEYS = [
-        '_elementor_data',
-        '_elementor_edit_mode',
-        '_elementor_template_type',
-        '_elementor_version',
-        '_elementor_pro_version',
-        '_elementor_page_settings',
-        '_elementor_controls_usage'
-      ];
-      const SEO_META_KEYS = [
-        // Yoast
-        '_yoast_wpseo_title', '_yoast_wpseo_metadesc', '_yoast_wpseo_focuskw',
-        '_yoast_wpseo_meta-robots-noindex', '_yoast_wpseo_meta-robots-nofollow',
-        '_yoast_wpseo_meta-robots-adv', '_yoast_wpseo_canonical',
-        '_yoast_wpseo_opengraph-title', '_yoast_wpseo_opengraph-description',
-        '_yoast_wpseo_opengraph-image', '_yoast_wpseo_opengraph-image-id',
-        '_yoast_wpseo_twitter-title', '_yoast_wpseo_twitter-description',
-        '_yoast_wpseo_twitter-image', '_yoast_wpseo_twitter-image-id',
-        // RankMath
-        'rank_math_title', 'rank_math_description', 'rank_math_focus_keyword',
-        'rank_math_robots', 'rank_math_canonical_url',
-        'rank_math_facebook_title', 'rank_math_facebook_description', 'rank_math_facebook_image',
-        'rank_math_twitter_title', 'rank_math_twitter_description', 'rank_math_twitter_image'
-      ];
-      // Fields on the post object that are NOT taxonomies (used to filter the rest as taxonomies)
-      const POST_NON_TAX_FIELDS = new Set([
-        'id', 'date', 'date_gmt', 'guid', 'modified', 'modified_gmt', 'password',
-        'slug', 'status', 'type', 'link', 'title', 'content', 'excerpt', 'author',
-        'featured_media', 'comment_status', 'ping_status', 'sticky', 'template',
-        'format', 'meta', 'parent', 'menu_order', '_links', '_embedded',
-        'generated_slug', 'permalink_template', 'class_list'
-      ]);
-
       const draftId = args.draft_id;
       const targetId = args.target_id;
       const copySeo = args.copy_seo !== false;
@@ -2459,8 +2487,10 @@ async function executeTool(name, args, clientConfig = null) {
 
       const draft = await wpReq(`/wp/v2/pages/${draftId}?context=edit`);
       if (!draft || !draft.id) throw new Error(`Draft page ${draftId} not found`);
-      const target = await wpReq(`/wp/v2/pages/${targetId}?context=edit&_fields=id,status`);
+      const target = await wpReq(`/wp/v2/pages/${targetId}?context=edit`);
       if (!target || !target.id) throw new Error(`Target page ${targetId} not found`);
+
+      const previousState = extractPageState(target);
 
       const payload = {
         title: draft.title?.raw ?? draft.title?.rendered ?? '',
@@ -2471,7 +2501,6 @@ async function executeTool(name, args, clientConfig = null) {
       if (typeof draft.menu_order === 'number') payload.menu_order = draft.menu_order;
       if (copyFeaturedImage && draft.featured_media) payload.featured_media = draft.featured_media;
 
-      // Build meta payload
       const wantedMetaKeys = [...ELEMENTOR_META_KEYS];
       if (copySeo) wantedMetaKeys.push(...SEO_META_KEYS);
       if (extraMetaKeys.length) wantedMetaKeys.push(...extraMetaKeys);
@@ -2490,7 +2519,6 @@ async function executeTool(name, args, clientConfig = null) {
       }
       if (Object.keys(meta).length > 0) payload.meta = meta;
 
-      // Taxonomies — opt-in. Any top-level field that's an array of ints and isn't a known core field.
       const copiedTaxonomies = [];
       if (copyTaxonomies) {
         for (const [k, v] of Object.entries(draft)) {
@@ -2516,7 +2544,7 @@ async function executeTool(name, args, clientConfig = null) {
       if (!verified) {
         throw new Error(
           `Verify failed: wrote ${expectedElementor.length} bytes of _elementor_data but read back ${verifyBytes}. ` +
-          `Draft ${draftId} NOT deleted. Restore target from revisions via wp_elementor_list_revisions if needed.`
+          `Draft ${draftId} NOT deleted. Use wp_restore_page_state with the previous_state from a prior wp_get_page_state call if you need to recover target ${targetId}.`
         );
       }
 
@@ -2536,7 +2564,8 @@ async function executeTool(name, args, clientConfig = null) {
           meta_keys: copiedMetaKeys,
           taxonomies: copiedTaxonomies
         },
-        rollback_hint: `Pre-publish state is the latest revision on page ${targetId}. List with wp_elementor_list_revisions and restore with wp_revisions_restore.`
+        previous_state: previousState,
+        rollback_hint: `To undo: call wp_restore_page_state with post_id=${targetId} and the previous_state above.`
       };
     }
 
@@ -2591,6 +2620,8 @@ async function executeTool(name, args, clientConfig = null) {
         };
       }
 
+      const previousState = extractPageState(page);
+
       const writePayload = {};
       if (contentHits > 0) writePayload.content = newContent;
       if (elementorChanged) writePayload.meta = { _elementor_data: newElementorString };
@@ -2613,48 +2644,51 @@ async function executeTool(name, args, clientConfig = null) {
         elementor_changed: elementorChanged,
         verified: afterBytes === expectedBytes,
         elementor_bytes: afterBytes,
-        rollback_hint: `Pre-replace state is the latest revision on page ${postId}.`
+        previous_state: previousState,
+        rollback_hint: `To undo: call wp_restore_page_state with post_id=${postId} and the previous_state above.`
       };
     }
 
-    case 'wp_revisions_restore': {
-      const pageId = args.page_id;
-      const revisionId = args.revision_id;
-      if (!pageId || !revisionId) throw new Error('page_id and revision_id required');
+    case 'wp_get_page_state': {
+      const postId = args.post_id;
+      if (!postId) throw new Error('post_id required');
+      const page = await wpReq(`/wp/v2/pages/${postId}?context=edit`);
+      if (!page || !page.id) throw new Error(`Page ${postId} not found`);
+      return { state: extractPageState(page) };
+    }
 
-      const revision = await wpReq(`/wp/v2/pages/${pageId}/revisions/${revisionId}?context=edit`);
-      if (!revision || !revision.id) {
-        throw new Error(`Revision ${revisionId} not found for page ${pageId}`);
-      }
+    case 'wp_restore_page_state': {
+      const postId = args.post_id;
+      const state = args.state;
+      if (!postId) throw new Error('post_id required');
+      if (!state || typeof state !== 'object') throw new Error('state object required');
 
-      const elementorData = revision.meta?._elementor_data;
-      const elementorString = typeof elementorData === 'string'
-        ? elementorData
-        : (elementorData != null ? JSON.stringify(elementorData) : null);
+      const payload = statePayload(state);
+      await wpReq(`/wp/v2/pages/${postId}`, { method: 'POST', body: payload });
 
-      const payload = {
-        title: revision.title?.raw ?? revision.title?.rendered ?? '',
-        content: revision.content?.raw ?? revision.content?.rendered ?? ''
-      };
-      if (elementorString !== null) {
-        payload.meta = { _elementor_data: elementorString };
-      }
-
-      await wpReq(`/wp/v2/pages/${pageId}`, { method: 'POST', body: payload });
-
-      const after = await wpReq(`/wp/v2/pages/${pageId}?context=edit&_fields=id,meta`);
+      const after = await wpReq(`/wp/v2/pages/${postId}?context=edit&_fields=id,meta`);
       const afterBytes = typeof after?.meta?._elementor_data === 'string'
         ? after.meta._elementor_data.length
         : 0;
-      const verified = elementorString === null ? true : afterBytes === elementorString.length;
+      const expectedElementor = payload.meta?._elementor_data;
+      const verified = expectedElementor === undefined
+        ? true
+        : afterBytes === expectedElementor.length;
 
       return {
         restored: true,
-        page_id: pageId,
-        revision_id: revisionId,
+        post_id: postId,
         verified,
         elementor_bytes: afterBytes,
-        rollback_hint: `The pre-restore state is now itself the latest revision on page ${pageId}.`
+        wrote: {
+          title: !!payload.title,
+          content: !!payload.content,
+          excerpt: !!payload.excerpt,
+          template: payload.template !== undefined,
+          menu_order: payload.menu_order !== undefined,
+          featured_media: payload.featured_media != null,
+          meta_keys: payload.meta ? Object.keys(payload.meta) : []
+        }
       };
     }
 
