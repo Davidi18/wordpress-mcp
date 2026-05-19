@@ -1595,12 +1595,16 @@ const tools = [
   // wp_elementor_list_revisions + wp_revisions_restore.
   {
     name: 'wp_publish_draft_over',
-    description: 'Promote a draft on top of an existing canonical page: copy title/content/_elementor_data from the draft into the target page (preserving target id, URL, and status), verify the write, then permanently delete the draft. WordPress auto-creates a revision of the pre-publish target — use wp_elementor_list_revisions + wp_revisions_restore to roll back if needed. Use this to ship a redesign without changing the live URL.',
+    description: 'Promote a draft on top of an existing canonical page: copy title/content/_elementor_data plus (by default) Elementor page settings, featured image, SEO meta (Yoast + RankMath), excerpt, template, and menu_order from the draft into the target page (preserving target id, URL, and status). Verifies the write, then permanently deletes the draft. WordPress auto-creates a revision of the pre-publish target — use wp_elementor_list_revisions + wp_revisions_restore to roll back. Use this to ship a redesign without changing the live URL.',
     inputSchema: {
       type: 'object',
       properties: {
         draft_id: { type: 'number', description: 'Source draft page id (will be deleted on success)' },
-        target_id: { type: 'number', description: 'Live target page id (will be overwritten with draft content)' }
+        target_id: { type: 'number', description: 'Live target page id (will be overwritten with draft content)' },
+        copy_seo: { type: 'boolean', description: 'Also copy Yoast + RankMath SEO meta keys present on the draft', default: true },
+        copy_featured_image: { type: 'boolean', description: 'Also copy featured_media id from draft', default: true },
+        copy_taxonomies: { type: 'boolean', description: 'Also copy taxonomy term ids (categories, tags, custom tax) from draft', default: false },
+        extra_meta_keys: { type: 'array', items: { type: 'string' }, description: 'Additional postmeta keys to copy from draft.meta (must be registered with show_in_rest)', default: [] }
       },
       required: ['draft_id', 'target_id']
     }
@@ -2410,8 +2414,46 @@ async function executeTool(name, args, clientConfig = null) {
     // Pure REST — no plugin required on the WP site.
     // WordPress's native auto-revisioning provides rollback for every write.
     case 'wp_publish_draft_over': {
+      const ELEMENTOR_META_KEYS = [
+        '_elementor_data',
+        '_elementor_edit_mode',
+        '_elementor_template_type',
+        '_elementor_version',
+        '_elementor_pro_version',
+        '_elementor_page_settings',
+        '_elementor_controls_usage'
+      ];
+      const SEO_META_KEYS = [
+        // Yoast
+        '_yoast_wpseo_title', '_yoast_wpseo_metadesc', '_yoast_wpseo_focuskw',
+        '_yoast_wpseo_meta-robots-noindex', '_yoast_wpseo_meta-robots-nofollow',
+        '_yoast_wpseo_meta-robots-adv', '_yoast_wpseo_canonical',
+        '_yoast_wpseo_opengraph-title', '_yoast_wpseo_opengraph-description',
+        '_yoast_wpseo_opengraph-image', '_yoast_wpseo_opengraph-image-id',
+        '_yoast_wpseo_twitter-title', '_yoast_wpseo_twitter-description',
+        '_yoast_wpseo_twitter-image', '_yoast_wpseo_twitter-image-id',
+        // RankMath
+        'rank_math_title', 'rank_math_description', 'rank_math_focus_keyword',
+        'rank_math_robots', 'rank_math_canonical_url',
+        'rank_math_facebook_title', 'rank_math_facebook_description', 'rank_math_facebook_image',
+        'rank_math_twitter_title', 'rank_math_twitter_description', 'rank_math_twitter_image'
+      ];
+      // Fields on the post object that are NOT taxonomies (used to filter the rest as taxonomies)
+      const POST_NON_TAX_FIELDS = new Set([
+        'id', 'date', 'date_gmt', 'guid', 'modified', 'modified_gmt', 'password',
+        'slug', 'status', 'type', 'link', 'title', 'content', 'excerpt', 'author',
+        'featured_media', 'comment_status', 'ping_status', 'sticky', 'template',
+        'format', 'meta', 'parent', 'menu_order', '_links', '_embedded',
+        'generated_slug', 'permalink_template', 'class_list'
+      ]);
+
       const draftId = args.draft_id;
       const targetId = args.target_id;
+      const copySeo = args.copy_seo !== false;
+      const copyFeaturedImage = args.copy_featured_image !== false;
+      const copyTaxonomies = args.copy_taxonomies === true;
+      const extraMetaKeys = Array.isArray(args.extra_meta_keys) ? args.extra_meta_keys : [];
+
       if (!draftId || !targetId) throw new Error('draft_id and target_id required');
       if (draftId === targetId) throw new Error('draft_id and target_id must differ');
 
@@ -2420,17 +2462,44 @@ async function executeTool(name, args, clientConfig = null) {
       const target = await wpReq(`/wp/v2/pages/${targetId}?context=edit&_fields=id,status`);
       if (!target || !target.id) throw new Error(`Target page ${targetId} not found`);
 
-      const draftElementor = draft.meta?._elementor_data;
-      const elementorString = typeof draftElementor === 'string'
-        ? draftElementor
-        : (draftElementor != null ? JSON.stringify(draftElementor) : '');
-
       const payload = {
         title: draft.title?.raw ?? draft.title?.rendered ?? '',
-        content: draft.content?.raw ?? draft.content?.rendered ?? ''
+        content: draft.content?.raw ?? draft.content?.rendered ?? '',
+        excerpt: draft.excerpt?.raw ?? ''
       };
-      if (draftElementor !== undefined) {
-        payload.meta = { _elementor_data: elementorString };
+      if (draft.template !== undefined && draft.template !== null) payload.template = draft.template;
+      if (typeof draft.menu_order === 'number') payload.menu_order = draft.menu_order;
+      if (copyFeaturedImage && draft.featured_media) payload.featured_media = draft.featured_media;
+
+      // Build meta payload
+      const wantedMetaKeys = [...ELEMENTOR_META_KEYS];
+      if (copySeo) wantedMetaKeys.push(...SEO_META_KEYS);
+      if (extraMetaKeys.length) wantedMetaKeys.push(...extraMetaKeys);
+
+      const meta = {};
+      const copiedMetaKeys = [];
+      const draftMeta = draft.meta || {};
+      for (const key of wantedMetaKeys) {
+        if (!(key in draftMeta)) continue;
+        const value = draftMeta[key];
+        if (value === '' || value === null) continue;
+        meta[key] = (key === '_elementor_data' && typeof value !== 'string')
+          ? JSON.stringify(value)
+          : value;
+        copiedMetaKeys.push(key);
+      }
+      if (Object.keys(meta).length > 0) payload.meta = meta;
+
+      // Taxonomies — opt-in. Any top-level field that's an array of ints and isn't a known core field.
+      const copiedTaxonomies = [];
+      if (copyTaxonomies) {
+        for (const [k, v] of Object.entries(draft)) {
+          if (POST_NON_TAX_FIELDS.has(k)) continue;
+          if (Array.isArray(v) && v.every(x => Number.isInteger(x))) {
+            payload[k] = v;
+            copiedTaxonomies.push(k);
+          }
+        }
       }
 
       await wpReq(`/wp/v2/pages/${targetId}`, { method: 'POST', body: payload });
@@ -2439,11 +2508,14 @@ async function executeTool(name, args, clientConfig = null) {
       const verifyBytes = typeof verify?.meta?._elementor_data === 'string'
         ? verify.meta._elementor_data.length
         : 0;
-      const verified = draftElementor === undefined ? true : verifyBytes === elementorString.length;
+      const expectedElementor = meta._elementor_data;
+      const verified = expectedElementor === undefined
+        ? true
+        : verifyBytes === expectedElementor.length;
 
       if (!verified) {
         throw new Error(
-          `Verify failed: wrote ${elementorString.length} bytes of _elementor_data but read back ${verifyBytes}. ` +
+          `Verify failed: wrote ${expectedElementor.length} bytes of _elementor_data but read back ${verifyBytes}. ` +
           `Draft ${draftId} NOT deleted. Restore target from revisions via wp_elementor_list_revisions if needed.`
         );
       }
@@ -2456,6 +2528,14 @@ async function executeTool(name, args, clientConfig = null) {
         deleted_draft_id: draftId,
         verified: true,
         elementor_bytes: verifyBytes,
+        copied: {
+          featured_image: copyFeaturedImage && !!draft.featured_media,
+          template: payload.template !== undefined,
+          menu_order: payload.menu_order !== undefined,
+          excerpt: !!payload.excerpt,
+          meta_keys: copiedMetaKeys,
+          taxonomies: copiedTaxonomies
+        },
         rollback_hint: `Pre-publish state is the latest revision on page ${targetId}. List with wp_elementor_list_revisions and restore with wp_revisions_restore.`
       };
     }
