@@ -958,6 +958,32 @@ const tools = [
       required: ['id']
     }
   },
+  {
+    name: 'wp_update_tag',
+    description: 'Update an existing tag',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Tag ID', required: true },
+        name: { type: 'string', description: 'Tag name' },
+        description: { type: 'string', description: 'Tag description' },
+        slug: { type: 'string', description: 'Tag slug' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_delete_tag',
+    description: 'Delete a tag (tags are non-hierarchical so deletion is immediate; the force flag is accepted for symmetry with wp_delete_category but WP requires force=true).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Tag ID', required: true },
+        force: { type: 'boolean', description: 'Required by WP REST for tag deletion', default: true }
+      },
+      required: ['id']
+    }
+  },
 
   // SITE INFO (3 endpoints)
   {
@@ -1033,86 +1059,6 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {}
-    }
-  },
-
-  // STRUDEL SCHEMA (requires strudel-schema plugin)
-  {
-    name: 'wp_get_schema',
-    description: 'Get JSON-LD schema configuration for a page/post (requires Strudel Schema plugin)',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', description: 'Post/Page ID', required: true }
-      },
-      required: ['id']
-    }
-  },
-  {
-    name: 'wp_set_schema',
-    description: 'Set JSON-LD schema for a page/post. Templates: service, about, blog, faq, course, local, product, custom',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', description: 'Post/Page ID', required: true },
-        template: { type: 'string', description: 'Template: service, about, blog, faq, course, local, product, custom' },
-        data: { type: 'object', description: 'Template data (e.g., {service_name: "...", area_served: "IL"})' },
-        override_json: { type: 'object', description: 'Full JSON-LD override (for custom template)' },
-        extra_json: { type: 'object', description: 'Extra schema nodes to merge' }
-      },
-      required: ['id']
-    }
-  },
-  {
-    name: 'wp_list_schemas',
-    description: 'List all pages/posts with schema configuration',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        template: { type: 'string', description: 'Filter by template (service, about, etc.)' },
-        per_page: { type: 'number', description: 'Results per page', default: 50 }
-      }
-    }
-  },
-  {
-    name: 'wp_preview_schema',
-    description: 'Preview rendered JSON-LD schema for a page without saving',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', description: 'Post/Page ID', required: true },
-        template: { type: 'string', description: 'Template to preview' },
-        data: { type: 'object', description: 'Template data to preview' }
-      },
-      required: ['id']
-    }
-  },
-
-  // SEO ROBOTS (index/noindex - requires strudel-schema plugin + Yoast SEO or Rank Math)
-  {
-    name: 'wp_get_seo_robots',
-    description: 'Get SEO robots settings (index/noindex, follow/nofollow) for a post. Requires strudel-schema plugin + Yoast/Rank Math.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', description: 'Post/Page ID', required: true }
-      },
-      required: ['id']
-    }
-  },
-  {
-    name: 'wp_set_seo_robots',
-    description: 'Set SEO robots settings for a post. Requires strudel-schema plugin. Set noindex:true to prevent indexing.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', description: 'Post/Page ID', required: true },
-        noindex: { type: 'boolean', description: 'Set to true to add noindex (prevent search engine indexing)' },
-        nofollow: { type: 'boolean', description: 'Set to true to add nofollow (prevent following links)' },
-        noarchive: { type: 'boolean', description: 'Set to true to add noarchive (prevent caching) - Rank Math only' },
-        nosnippet: { type: 'boolean', description: 'Set to true to add nosnippet (prevent snippets) - Rank Math only' }
-      },
-      required: ['id']
     }
   },
 
@@ -3407,6 +3353,27 @@ async function executeTool(name, args, clientConfig = null) {
       return { deleted: true, id: args.id };
     }
 
+    case 'wp_update_tag': {
+      const updates = {};
+      if (args.name !== undefined) updates.name = args.name;
+      if (args.description !== undefined) updates.description = args.description;
+      if (args.slug !== undefined) updates.slug = args.slug;
+
+      const tag = await wpReq(`/wp/v2/tags/${args.id}`, {
+        method: 'POST',
+        body: JSON.stringify(updates)
+      });
+      return { id: tag.id, name: tag.name, slug: tag.slug };
+    }
+
+    case 'wp_delete_tag': {
+      const force = args.force !== false;
+      await wpReq(`/wp/v2/tags/${args.id}?force=${force}`, {
+        method: 'DELETE'
+      });
+      return { deleted: true, id: args.id };
+    }
+
     // SITE INFO
     case 'wp_get_site_info': {
       const settings = await wpReq('/wp/v2/settings');
@@ -3773,72 +3740,6 @@ return "Agency OS File API installed successfully! ($result bytes)";`;
         }
         throw error;
       }
-    }
-
-    // STRUDEL SCHEMA
-    case 'wp_get_schema': {
-      const result = await wpReq(`/strudel-schema/v1/post/${args.id}`);
-      return result;
-    }
-
-    case 'wp_set_schema': {
-      const payload = {
-        mode: 'override' // Always override
-      };
-      if (args.template) payload.template = args.template;
-      if (args.data) payload.data_json = args.data;
-      if (args.override_json) payload.override_json = args.override_json;
-      if (args.extra_json) payload.extra_json = args.extra_json;
-
-      const result = await wpReq(`/strudel-schema/v1/post/${args.id}`, {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-      return result;
-    }
-
-    case 'wp_list_schemas': {
-      const params = new URLSearchParams({
-        per_page: String(args.per_page || 50)
-      });
-      if (args.template) params.append('template', args.template);
-
-      const result = await wpReq(`/strudel-schema/v1/posts?${params}`);
-      return result;
-    }
-
-    case 'wp_preview_schema': {
-      const payload = {
-        mode: 'override'
-      };
-      if (args.template) payload.template = args.template;
-      if (args.data) payload.data_json = args.data;
-
-      const result = await wpReq(`/strudel-schema/v1/post/${args.id}/preview`, {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-      return result;
-    }
-
-    // SEO ROBOTS (requires strudel-schema plugin)
-    case 'wp_get_seo_robots': {
-      const result = await wpReq(`/strudel-schema/v1/seo-robots/${args.id}`);
-      return result;
-    }
-
-    case 'wp_set_seo_robots': {
-      const payload = {};
-      if (args.noindex !== undefined) payload.noindex = args.noindex;
-      if (args.nofollow !== undefined) payload.nofollow = args.nofollow;
-      if (args.noarchive !== undefined) payload.noarchive = args.noarchive;
-      if (args.nosnippet !== undefined) payload.nosnippet = args.nosnippet;
-
-      const result = await wpReq(`/strudel-schema/v1/seo-robots/${args.id}`, {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-      return result;
     }
 
     // PLUGINS

@@ -22,10 +22,6 @@
 - 📦 **Orders Management** - List, view, and update order status
 - 🖼️ **Product Images** - Add/update product images via URL or media ID
 
-### v2.4 Features:
-- 🔍 **SEO Robots Control** - Manage index/noindex settings for Yoast/Rank Math
-- 🤖 **Auto-Detection** - Automatically detects active SEO plugin
-
 ### v2.3 Features:
 - 🔌 **Plugin Management** - Complete CRUD for WordPress plugins
 - 📦 **Install from WordPress.org** - `wp_install_plugin` by slug
@@ -150,10 +146,6 @@
 - **`wp_delete_plugin`** - Delete a plugin (must be deactivated)
 - **`wp_update_plugin`** - Update to latest version
 - **`wp_bootstrap_plugin_installer`** - Setup ZIP installer API
-
-### SEO Robots (2 endpoints) ✨ v2.4
-- **`wp_get_seo_robots`** - Get indexing settings (noindex, nofollow, etc.)
-- **`wp_set_seo_robots`** - Set indexing settings for Yoast SEO or Rank Math
 
 ### WooCommerce Products (5 endpoints) ✨ NEW in v2.5!
 - **`wc_list_products`** - List products with filters (category, status, SKU, on_sale)
@@ -441,77 +433,6 @@ Instead of asking the agent to hand-author Elementor JSON, hand it the design sy
 }
 ```
 
-### SEO Robots Control (NEW in v2.4!)
-
-Control how search engines index your content. Works with **Yoast SEO** or **Rank Math**.
-
-#### Get Current SEO Settings
-```javascript
-{
-  "tool": "wp_get_seo_robots",
-  "args": { "id": 42 }
-}
-// Returns:
-// {
-//   "post_id": 42,
-//   "seo_plugin": "yoast",  // or "rankmath"
-//   "robots": {
-//     "noindex": false,
-//     "nofollow": false,
-//     "noarchive": false,
-//     "nosnippet": false
-//   }
-// }
-```
-
-#### Set Page to NoIndex (Hide from Search Engines)
-```javascript
-{
-  "tool": "wp_set_seo_robots",
-  "args": {
-    "id": 42,
-    "noindex": true
-  }
-}
-```
-
-#### Set Multiple Robot Directives
-```javascript
-{
-  "tool": "wp_set_seo_robots",
-  "args": {
-    "id": 42,
-    "noindex": true,
-    "nofollow": true,
-    "noarchive": true,   // Rank Math only
-    "nosnippet": true    // Rank Math only
-  }
-}
-```
-
-#### Reset to Index (Allow Indexing)
-```javascript
-{
-  "tool": "wp_set_seo_robots",
-  "args": {
-    "id": 42,
-    "noindex": false,
-    "nofollow": false
-  }
-}
-```
-
-**Supported Options:**
-
-| Option | Yoast SEO | Rank Math | Description |
-|--------|-----------|-----------|-------------|
-| `noindex` | ✅ | ✅ | Prevent search engine indexing |
-| `nofollow` | ✅ | ✅ | Prevent following links on page |
-| `noarchive` | ❌ | ✅ | Prevent cached version |
-| `nosnippet` | ❌ | ✅ | Prevent search snippets |
-
----
-
 ### WooCommerce (NEW in v2.5!)
 
 Full WooCommerce support for managing products, categories, variations, and orders.
@@ -693,9 +614,10 @@ CLIENT9_WC_CONSUMER_SECRET=cs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 | Custom Posts | 3 endpoints | 3 endpoints | 100% ✅ |
 | Site Info | 0 endpoints | 3 endpoints | 100% ✨ |
 | Plugins | 0 endpoints | 8 endpoints | ✨ |
-| SEO Robots | 0 endpoints | 2 endpoints | ✨ |
+| Taxonomy (tags) | 2 endpoints | 4 endpoints | 100% ✨ |
 | **WooCommerce** | 0 endpoints | **16 endpoints** | **NEW ✨** |
-| **TOTAL** | **18 endpoints** | **62 endpoints** | **244% more!** |
+| **Elementor** | 0 endpoints | **14 endpoints** | **NEW ✨ v2.6** |
+| **Control Plane** | 0 endpoints | **4 endpoints** | **NEW ✨ v2.6** |
 
 ---
 
@@ -1241,8 +1163,13 @@ npm start
   - `wp_elementor_list_revisions` (read-only — see note)
 - 🔐 **Transport hardening** — bearer auth on the HTTP API, request body size cap, secret redaction in logs, fetch timeout + retry with exponential backoff
 
+#### Added (Taxonomy symmetry)
+- 🏷️ `wp_update_tag` and `wp_delete_tag` — close the gap with categories (which had full CRUD)
+
 #### Removed
 - ❌ `wp_revisions_restore` — WP REST does not expose `meta` (and therefore `_elementor_data`) in revision responses; rollback via revisions is impossible without a server-side PHP plugin. Verified on multiple live sites. Replaced by the stateless `previous_state` + `wp_restore_page_state` flow.
+- ❌ `wp_get_schema`, `wp_set_schema`, `wp_list_schemas`, `wp_preview_schema` — required the custom `strudel-schema` plugin to be installed on every target site. Out of scope for a WP-core + Elementor focused server. Sites that need JSON-LD generation should run that flow inside their own infra.
+- ❌ `wp_get_seo_robots`, `wp_set_seo_robots` — same reason: piggybacked on the `strudel-schema` plugin. Robots/noindex flags can still be written via the existing `_yoast_wpseo_meta-robots-noindex` / `rank_math_robots` postmeta keys through `wp_update_page` if needed.
 
 #### Improved
 - Centralized Elementor + SEO meta-key lists in `wp-meta-keys.js` (previously inlined per case handler)
