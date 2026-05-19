@@ -1,0 +1,82 @@
+{
+  "version": "0.4",
+  "title": "Hero — Split (text + image)",
+  "type": "section",
+  "content": [
+    {
+      "id": "hssec1",
+      "elType": "section",
+      "isInner": false,
+      "settings": {
+        "structure": "20",
+        "padding": { "unit": "px", "top": "80", "right": "20", "bottom": "80", "left": "20", "isLinked": false },
+        "content_position": "middle",
+        "gap": "extended"
+      },
+      "elements": [
+        {
+          "id": "hscol1",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 50, "_inline_size": null, "content_position": "center" },
+          "elements": [
+            {
+              "id": "hswg1",
+              "elType": "widget",
+              "widgetType": "heading",
+              "settings": {
+                "title": "{{HERO_TITLE}}",
+                "header_size": "h1",
+                "align": "left",
+                "size": "xl"
+              },
+              "elements": []
+            },
+            {
+              "id": "hswg2",
+              "elType": "widget",
+              "widgetType": "text-editor",
+              "settings": {
+                "editor": "<p>{{HERO_SUBTITLE}}</p>",
+                "align": "left"
+              },
+              "elements": []
+            },
+            {
+              "id": "hswg3",
+              "elType": "widget",
+              "widgetType": "button",
+              "settings": {
+                "text": "{{HERO_CTA}}",
+                "link": { "url": "{{HERO_CTA_URL}}", "is_external": "", "nofollow": "" },
+                "align": "left",
+                "size": "md"
+              },
+              "elements": []
+            }
+          ]
+        },
+        {
+          "id": "hscol2",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 50, "_inline_size": null, "content_position": "center" },
+          "elements": [
+            {
+              "id": "hswg4",
+              "elType": "widget",
+              "widgetType": "image",
+              "settings": {
+                "image": { "url": "{{HERO_IMAGE_URL}}", "id": "" },
+                "image_size": "large",
+                "align": "center",
+                "caption_source": "none"
+              },
+              "elements": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

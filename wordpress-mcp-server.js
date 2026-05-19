@@ -1595,17 +1595,18 @@ const tools = [
   },
   {
     name: 'wp_elementor_list_blocks',
-    description: 'List curated, professionally-designed Elementor blocks/templates that can be inserted into a page. Use this BEFORE building a layout from scratch — pick a block here and insert it instead of hand-crafting widgets. Categories include: about, contact, homepage, landing-page, pricing, portfolio, coming-soon.',
+    description: 'List curated, professionally-designed Elementor blocks/templates that can be inserted into a page. Use this BEFORE building a layout from scratch — pick a block here and insert it instead of hand-crafting widgets. Two sources: `local` (atomic sections shipped in this repo: hero, features, testimonials, cta, faq, pricing, team — compose a page section-by-section, with {{PLACEHOLDER}} tokens you fill in later via wp_replace_text) and `obfx` (full landing-page templates from Codeinwp/obfx-templates).',
     inputSchema: {
       type: 'object',
       properties: {
-        category: { type: 'string', description: 'Filter by category (about, contact, homepage, landing-page, pricing, portfolio, coming-soon)' }
+        category: { type: 'string', description: 'Filter by category. Local: hero, features, testimonials, cta, faq, pricing, team. obfx: about, contact, homepage, landing-page, pricing, portfolio, coming-soon.' },
+        source: { type: 'string', enum: ['local', 'obfx'], description: 'Filter by source. Omit to list both.' }
       }
     }
   },
   {
     name: 'wp_elementor_get_block',
-    description: 'Get the full Elementor JSON for a curated block by id (returned from wp_elementor_list_blocks). Use this to preview structure before inserting, or to extract sections for a custom composition.',
+    description: 'Get the full Elementor JSON for a curated block by id (returned from wp_elementor_list_blocks). For local blocks, the response also includes a `placeholders` array listing every {{PLACEHOLDER}} token in the block — substitute them via wp_replace_text after insertion to fill in real content.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2423,10 +2424,11 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_elementor_list_blocks': {
-      const blocks = listBlocks({ category: args.category });
+      const blocks = listBlocks({ category: args.category, source: args.source });
       return {
         total: blocks.length,
         categories: [...new Set(BLOCKS_MANIFEST.map(b => b.category))].sort(),
+        sources: ['local', 'obfx'],
         blocks
       };
     }

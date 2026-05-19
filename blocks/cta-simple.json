@@ -1,0 +1,64 @@
+{
+  "version": "0.4",
+  "title": "CTA — Centered banner",
+  "type": "section",
+  "content": [
+    {
+      "id": "ctasec",
+      "elType": "section",
+      "isInner": false,
+      "settings": {
+        "structure": "10",
+        "padding": { "unit": "px", "top": "80", "right": "20", "bottom": "80", "left": "20", "isLinked": false },
+        "background_background": "classic",
+        "background_color": "#1a1a2e",
+        "content_position": "middle"
+      },
+      "elements": [
+        {
+          "id": "ctacol",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 100, "_inline_size": null },
+          "elements": [
+            {
+              "id": "ctawg1",
+              "elType": "widget",
+              "widgetType": "heading",
+              "settings": {
+                "title": "{{CTA_TITLE}}",
+                "header_size": "h2",
+                "align": "center",
+                "size": "xl",
+                "title_color": "#ffffff"
+              },
+              "elements": []
+            },
+            {
+              "id": "ctawg2",
+              "elType": "widget",
+              "widgetType": "text-editor",
+              "settings": {
+                "editor": "<p style=\"text-align: center; color: #e0e0e0;\">{{CTA_SUBTITLE}}</p>"
+              },
+              "elements": []
+            },
+            {
+              "id": "ctawg3",
+              "elType": "widget",
+              "widgetType": "button",
+              "settings": {
+                "text": "{{CTA_BUTTON}}",
+                "link": { "url": "{{CTA_BUTTON_URL}}", "is_external": "", "nofollow": "" },
+                "align": "center",
+                "size": "lg",
+                "button_type": "success"
+              },
+              "elements": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

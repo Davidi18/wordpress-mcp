@@ -1,0 +1,113 @@
+{
+  "version": "0.4",
+  "title": "Testimonials — 3 columns",
+  "type": "section",
+  "content": [
+    {
+      "id": "t3sec1",
+      "elType": "section",
+      "isInner": false,
+      "settings": {
+        "structure": "10",
+        "padding": { "unit": "px", "top": "80", "right": "20", "bottom": "40", "left": "20", "isLinked": false }
+      },
+      "elements": [
+        {
+          "id": "t3hcol",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 100, "_inline_size": null },
+          "elements": [
+            {
+              "id": "t3wgh",
+              "elType": "widget",
+              "widgetType": "heading",
+              "settings": {
+                "title": "{{TESTIMONIALS_TITLE}}",
+                "header_size": "h2",
+                "align": "center",
+                "size": "xl"
+              },
+              "elements": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t3sec2",
+      "elType": "section",
+      "isInner": false,
+      "settings": {
+        "structure": "30",
+        "padding": { "unit": "px", "top": "20", "right": "20", "bottom": "80", "left": "20", "isLinked": false },
+        "gap": "extended"
+      },
+      "elements": [
+        {
+          "id": "t3col1",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 33, "_inline_size": null },
+          "elements": [
+            {
+              "id": "t3tw1",
+              "elType": "widget",
+              "widgetType": "testimonial",
+              "settings": {
+                "testimonial_content": "{{TESTIMONIAL_1_QUOTE}}",
+                "testimonial_name": "{{TESTIMONIAL_1_NAME}}",
+                "testimonial_job": "{{TESTIMONIAL_1_ROLE}}",
+                "testimonial_alignment": "center",
+                "testimonial_image_position": "aside"
+              },
+              "elements": []
+            }
+          ]
+        },
+        {
+          "id": "t3col2",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 33, "_inline_size": null },
+          "elements": [
+            {
+              "id": "t3tw2",
+              "elType": "widget",
+              "widgetType": "testimonial",
+              "settings": {
+                "testimonial_content": "{{TESTIMONIAL_2_QUOTE}}",
+                "testimonial_name": "{{TESTIMONIAL_2_NAME}}",
+                "testimonial_job": "{{TESTIMONIAL_2_ROLE}}",
+                "testimonial_alignment": "center",
+                "testimonial_image_position": "aside"
+              },
+              "elements": []
+            }
+          ]
+        },
+        {
+          "id": "t3col3",
+          "elType": "column",
+          "isInner": false,
+          "settings": { "_column_size": 33, "_inline_size": null },
+          "elements": [
+            {
+              "id": "t3tw3",
+              "elType": "widget",
+              "widgetType": "testimonial",
+              "settings": {
+                "testimonial_content": "{{TESTIMONIAL_3_QUOTE}}",
+                "testimonial_name": "{{TESTIMONIAL_3_NAME}}",
+                "testimonial_job": "{{TESTIMONIAL_3_ROLE}}",
+                "testimonial_alignment": "center",
+                "testimonial_image_position": "aside"
+              },
+              "elements": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
