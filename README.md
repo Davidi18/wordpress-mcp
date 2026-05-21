@@ -188,6 +188,8 @@
 - **`wp_elementor_get_block`** - Get the JSON for one curated block (drop-in for `wp_elementor_insert_block`)
 - **`wp_elementor_insert_block`** - Insert a curated block at a given position in a target page
 - **`wp_elementor_guidelines`** - Return the site's design tokens (typography scale, color palette, spacing rules) — feed this to the agent before it composes a page
+- **`wp_elementor_capabilities`** - Discover what's available BEFORE building: Elementor version, Pro (active + version), active kit id, container-experiment heuristic, and detected popular addon packs (UAE, Essential Addons, JetEngine, Happy Addons, etc.). Lets the agent decide whether to use Pro widgets (form, price-table, slides, popup) or fall back.
+- **`wp_set_static_front_page`** - Set the WordPress homepage to a specific page (Reading Settings → "A static page"). Pass `page_id:0` to revert to "Your latest posts". Optionally set the blog listing page too. Returns `previous_state` for rollback.
 
 ### Elementor Surgical Primitives (5 endpoints) ✨ NEW
 Address Elementor elements by id without touching the rest of the page. Foundational for maintenance work (e.g. "update the CTA button text on every page that has one"). All mutating tools return `previous_state` for rollback.
