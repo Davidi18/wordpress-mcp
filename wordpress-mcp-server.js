@@ -9,6 +9,14 @@ import fs from 'fs';
 import pg from 'pg';
 import { BLOCKS_MANIFEST, listBlocks, getBlock, parseElementorData, spliceBlock } from './elementor-blocks-library.js';
 import { buildGuidelines } from './elementor-guidelines.js';
+import {
+  fetchActiveKit,
+  parseKitSettings,
+  applyKitChanges,
+  diffSize,
+  writeKitSettings,
+  KIT_META_KEY
+} from './elementor-kit.js';
 import { applyReplaceText, walkElementorReplace } from './elementor-replace-text.js';
 import { ELEMENTOR_META_KEYS, SEO_META_KEYS, POST_NON_TAX_FIELDS } from './wp-meta-keys.js';
 import {
@@ -1572,6 +1580,37 @@ const tools = [
     }
   },
   {
+    name: 'wp_elementor_update_kit',
+    description: 'Update the active Elementor Kit (Site Settings → Global Colors / Fonts / Layout). Changes cascade to every widget that references a global token. **Widgets with hard-coded hex values are NOT affected** — that\'s an Elementor limitation; use wp_replace_text to migrate hard-coded values, or convert widgets to global references first. Returns `previous_state` (full pre-change kit settings) for rollback — pass it back as the args of a second call to revert. Use `dry_run: true` to preview the diff without writing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        system_colors: {
+          type: 'object',
+          description: 'Update default brand colors. Keys are stable system color slugs ("primary", "secondary", "text", "accent"); values are hex strings. Example: { "primary": "#1A1A2E", "accent": "#FF6B35" }.'
+        },
+        custom_colors: {
+          type: 'object',
+          description: 'Update or create named custom colors. Keys are existing _id / title or a new name (slugified to a new _id if no match). Values are either a hex string or { color, title }. Example: { "Brand Yellow": "#FFC107" } or { "muted_grey": { color: "#999", title: "Muted Grey" } }.'
+        },
+        system_typography: {
+          type: 'object',
+          description: 'Update default typography presets. Keys: "primary", "secondary", "text", "accent". Values: { font_family?, font_weight?, font_size?: { unit, size }, line_height?: { unit, size }, letter_spacing?: { unit, size }, font_style?, text_transform?, text_decoration? }. The `typography_typography: "custom"` enable flag is set automatically.'
+        },
+        custom_typography: {
+          type: 'object',
+          description: 'Update or create named custom typography presets. Same value shape as system_typography. Optional `title` inside the value sets the display name.'
+        },
+        layout: {
+          type: 'object',
+          description: 'Layout knobs: container_width: { unit, size }, space_between_widgets: { unit, size }, viewport_md / viewport_lg / viewport_mobile / viewport_tablet (numbers in px).'
+        },
+        kit_id: { type: 'number', description: 'Override active-kit auto-detection. Omit unless you know the kit post id explicitly.' },
+        dry_run: { type: 'boolean', description: 'If true, computes the diff and returns it without writing.', default: false }
+      }
+    }
+  },
+  {
     name: 'wp_elementor_insert_block',
     description: 'Insert a curated block into an existing page. Fetches the block, regenerates element ids to avoid collisions, and appends (or inserts at the given position) into the page _elementor_data. Use this instead of hand-writing widget JSON.',
     inputSchema: {
@@ -2386,6 +2425,60 @@ async function executeTool(name, args, clientConfig = null) {
         include_observed: args.include_observed !== false,
         sample_size: args.sample_size
       });
+    }
+
+    case 'wp_elementor_update_kit': {
+      const kit = await fetchActiveKit(wpReq, { kit_id: args.kit_id });
+      const current = parseKitSettings(kit.meta?.[KIT_META_KEY]);
+      const changes = {
+        system_colors: args.system_colors,
+        custom_colors: args.custom_colors,
+        system_typography: args.system_typography,
+        custom_typography: args.custom_typography,
+        layout: args.layout
+      };
+      const { next, diff } = applyKitChanges(current, changes);
+      const changeCount = diffSize(diff);
+
+      if (changeCount === 0) {
+        return {
+          updated: false,
+          kit_id: kit.id,
+          kit_title: kit.title?.rendered || '',
+          message: 'No effective changes (every requested value already matches the kit).',
+          diff
+        };
+      }
+
+      if (args.dry_run) {
+        return {
+          updated: false,
+          dry_run: true,
+          kit_id: kit.id,
+          kit_title: kit.title?.rendered || '',
+          change_count: changeCount,
+          diff
+        };
+      }
+
+      const verify = await writeKitSettings(wpReq, kit.id, next);
+      if (!verify.verified) {
+        throw new Error(
+          `Verify failed: wrote ${verify.written_bytes} bytes but read back ${verify.read_back_bytes}. ` +
+          `Kit ${kit.id} may be in an inconsistent state — re-fetch and check before retrying.`
+        );
+      }
+
+      return {
+        updated: true,
+        kit_id: kit.id,
+        kit_title: kit.title?.rendered || '',
+        change_count: changeCount,
+        diff,
+        verified: true,
+        bytes_written: verify.written_bytes,
+        previous_state: current
+      };
     }
 
     case 'wp_elementor_insert_block': {
