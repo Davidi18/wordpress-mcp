@@ -1491,14 +1491,15 @@ const tools = [
   },
   {
     name: 'wp_elementor_create_page',
-    description: 'Create a new WordPress page with Elementor data',
+    description: 'Create a new WordPress page with Elementor data. For full-bleed landing pages, set template:"elementor_canvas" (no theme header/footer/sidebar). For pages that keep the theme chrome but drop the sidebar, use "elementor_header_footer". Default is the theme\'s default template.',
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Page title', required: true },
         status: { type: 'string', description: 'Page status (publish, draft, pending, private)', default: 'draft' },
         content: { type: 'string', description: 'Standard WordPress content (optional)' },
-        elementor_data: { type: 'string', description: 'Elementor page data as JSON string', required: true }
+        elementor_data: { type: 'string', description: 'Elementor page data as JSON string', required: true },
+        template: { type: 'string', enum: ['default', 'elementor_canvas', 'elementor_header_footer'], description: 'Page template. "elementor_canvas" = blank canvas (no theme chrome — ideal for landing pages). "elementor_header_footer" = keeps theme header/footer, drops sidebar.' }
       },
       required: ['title', 'elementor_data']
     }
@@ -1513,7 +1514,8 @@ const tools = [
         title: { type: 'string', description: 'Page title' },
         status: { type: 'string', description: 'Page status' },
         content: { type: 'string', description: 'Standard WordPress content' },
-        elementor_data: { type: 'string', description: 'Elementor page data as JSON string' }
+        elementor_data: { type: 'string', description: 'Elementor page data as JSON string' },
+        template: { type: 'string', enum: ['default', 'elementor_canvas', 'elementor_header_footer'], description: 'Switch the page template. Useful for converting an existing page into a canvas landing page.' }
       },
       required: ['id']
     }
@@ -2310,16 +2312,23 @@ async function executeTool(name, args, clientConfig = null) {
           throw new Error('elementor_data is not valid JSON string.');
         }
       }
-      const created = await wpReq('/wp/v2/pages', {
-        method: 'POST',
-        body: {
-          title: args.title,
-          status: args.status || 'draft',
-          content: args.content || '',
-          meta: { _elementor_data: args.elementor_data }
-        }
-      });
-      return { id: created.id, title: created.title?.rendered || args.title };
+      const meta = { _elementor_data: args.elementor_data };
+      if (args.template && args.template !== 'default') {
+        meta._wp_page_template = args.template;
+      }
+      const body = {
+        title: args.title,
+        status: args.status || 'draft',
+        content: args.content || '',
+        meta
+      };
+      if (args.template && args.template !== 'default') body.template = args.template;
+      const created = await wpReq('/wp/v2/pages', { method: 'POST', body });
+      return {
+        id: created.id,
+        title: created.title?.rendered || args.title,
+        template: created.template || args.template || 'default'
+      };
     }
 
     case 'wp_elementor_update_page': {
@@ -2335,8 +2344,15 @@ async function executeTool(name, args, clientConfig = null) {
         }
         updatePayload.meta = { _elementor_data: args.elementor_data };
       }
+      if (args.template !== undefined) {
+        updatePayload.template = args.template === 'default' ? '' : args.template;
+        updatePayload.meta = {
+          ...(updatePayload.meta || {}),
+          _wp_page_template: args.template === 'default' ? 'default' : args.template
+        };
+      }
       if (Object.keys(updatePayload).length === 0) {
-        throw new Error('No update data provided (title, status, content, or elementor_data).');
+        throw new Error('No update data provided (title, status, content, elementor_data, or template).');
       }
       await wpReq(`/wp/v2/pages/${args.id}`, {
         method: 'POST',
