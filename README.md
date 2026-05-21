@@ -196,6 +196,8 @@
 - **`wp_elementor_get_block`** - Get the JSON for one curated block (drop-in for `wp_elementor_insert_block`)
 - **`wp_elementor_insert_block`** - Insert a curated block at a given position in a target page
 - **`wp_elementor_guidelines`** - Return the site's design tokens (typography scale, color palette, spacing rules) — feed this to the agent before it composes a page
+- **`wp_elementor_create_popup`** - Create an Elementor Pro popup template with simplified triggers (page_load_delay, scroll_percentage, click_selector, exit_intent, inactivity_seconds), timing (max_shows, device_types, logged_in scope), and display conditions (include/exclude page or post ids, or "everywhere"). Escape hatches: `triggers_raw`, `conditions_raw`, `advanced_settings`. Requires Elementor Pro.
+- **`wp_elementor_add_scoped_style`** - Add an HTML widget with a scoped `<style>` block next to an existing widget. Selectors auto-prefixed with `.elementor-element-<scope_id>` (the section/container holding the target widget) so the override only applies locally — the standard Elementor pattern for surgical CSS that doesn't leak. Pass `auto_scope:false` to write fully-qualified selectors yourself.
 
 ### Elementor Surgical Primitives (5 endpoints) ✨ NEW
 Address Elementor elements by id without touching the rest of the page. Foundational for maintenance work (e.g. "update the CTA button text on every page that has one"). All mutating tools return `previous_state` for rollback.

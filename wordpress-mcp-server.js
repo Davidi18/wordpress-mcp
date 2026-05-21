@@ -18,6 +18,7 @@ import {
   normalizeWidget,
   summarizeTree
 } from './elementor-tree.js';
+import { buildPopupSettings, buildConditions } from './elementor-popup.js';
 import { ELEMENTOR_META_KEYS, SEO_META_KEYS, POST_NON_TAX_FIELDS } from './wp-meta-keys.js';
 import {
   requireApiKey,
@@ -1646,6 +1647,50 @@ const tools = [
       required: ['page_id', 'block_id']
     }
   },
+  {
+    name: 'wp_elementor_create_popup',
+    description: 'Create an Elementor Pro popup template. Requires Elementor Pro on the target site (popups are Pro-only). The popup is created as a post in elementor_library with template_type=popup. Use simplified `triggers` / `timing` / `conditions` shape, or pass `triggers_raw` / `conditions_raw` / `advanced_settings` for full control. Default status is "publish" (popups only fire when published). Note: Elementor Pro may require visiting the Display Conditions UI once to register the popup with its dispatch cache — if the popup doesn\'t appear on the live site, that\'s the fix.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Popup title (internal name).', required: true },
+        content: { type: 'array', description: 'Array of Elementor sections/containers — the popup body. Defaults to []. Same shape as wp_elementor_create_page elementor_data (but parsed, not stringified).' },
+        triggers: {
+          type: 'object',
+          description: 'Trigger config. Ergonomic shape: { page_load?: bool, page_load_delay?: number_seconds, scroll?: bool, scroll_percentage?: 0-100, scroll_direction?: "down"|"up", click_selector?: string, exit_intent?: bool, inactivity_seconds?: number }.'
+        },
+        timing: {
+          type: 'object',
+          description: 'Timing/frequency config: { max_shows?: number, session_max_shows?: number, device_types?: ["desktop","tablet","mobile"], logged_in?: "logged_in_only"|"logged_out_only" }.'
+        },
+        conditions: {
+          type: 'object',
+          description: 'Where the popup appears. Ergonomic shape: { include_everywhere?: bool, include_page_ids?: number[], exclude_page_ids?: number[], include_post_ids?: number[], exclude_post_ids?: number[] }. Defaults to "include everywhere" if nothing specified — without an include rule the popup never activates.'
+        },
+        triggers_raw: { type: 'object', description: 'Escape hatch — flat Elementor trigger settings (triggers_on_*). Merged over the values built from `triggers`.' },
+        conditions_raw: { type: 'array', description: 'Escape hatch — raw conditions array (verbatim _elementor_conditions value).' },
+        advanced_settings: { type: 'object', description: 'Escape hatch — extra _elementor_page_settings entries (animations, close button, etc.).' },
+        status: { type: 'string', enum: ['publish', 'draft'], description: 'Default "publish". A draft popup is not dispatched.', default: 'publish' }
+      },
+      required: ['title']
+    }
+  },
+  {
+    name: 'wp_elementor_add_scoped_style',
+    description: 'Add an HTML widget with a scoped <style> block next to an existing widget — the standard Elementor pattern for surgical CSS overrides that don\'t leak to other instances of the same widget type. By default, every selector in `css` is auto-prefixed with `.elementor-element-<scope_id>` so the styles only apply within that container. `scope_id` defaults to the SECTION/CONTAINER that holds `target_widget_id` (so the style applies to that whole row, including siblings of the target). Pass `auto_scope:false` to drop in CSS verbatim. Returns the inserted style-widget id + previous_state.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id', required: true },
+        target_widget_id: { type: 'string', description: 'Widget id whose container should be the scope (default).', required: true },
+        css: { type: 'string', description: 'CSS rules. No <style> tag needed. With auto_scope (default), prefix every selector with `.elementor-element-<scope_id>` automatically.', required: true },
+        scope_id: { type: 'string', description: 'Override the scope element id. Defaults to the parent of target_widget_id.' },
+        auto_scope: { type: 'boolean', description: 'Prefix selectors with the scope id. Disable if you\'re writing fully-qualified selectors yourself.', default: true },
+        placement: { type: 'string', enum: ['after', 'before', 'end_of_parent', 'start_of_parent'], description: 'Where to insert the style widget. Default "end_of_parent".', default: 'end_of_parent' }
+      },
+      required: ['page_id', 'target_widget_id', 'css']
+    }
+  },
 
   // ── SURGICAL PRIMITIVES — address Elementor elements by id ──
   // Inspect, patch, duplicate, or insert a single element without touching the
@@ -2689,6 +2734,144 @@ async function executeTool(name, args, clientConfig = null) {
         page_id: args.page_id,
         element_id: insertedId,
         widgetType: widget.widgetType || null,
+        verified: verifyBytes === serialized.length,
+        bytes_written: serialized.length,
+        previous_state: previousState
+      };
+    }
+
+    // ── POPUP & SCOPED-CSS HELPERS ──
+    case 'wp_elementor_create_popup': {
+      if (!args.title) throw new Error('title required');
+      const content = Array.isArray(args.content) ? args.content : [];
+
+      const popupSettings = {
+        ...buildPopupSettings({
+          triggers: args.triggers,
+          timing: args.timing,
+          advanced: args.advanced_settings
+        }),
+        ...(args.triggers_raw && typeof args.triggers_raw === 'object' ? args.triggers_raw : {})
+      };
+      const conditions = args.conditions_raw
+        ? buildConditions(args.conditions_raw)
+        : buildConditions(args.conditions);
+
+      const meta = {
+        _elementor_template_type: 'popup',
+        _elementor_data: JSON.stringify(content),
+        _elementor_page_settings: JSON.stringify(popupSettings),
+        _elementor_conditions: JSON.stringify(conditions),
+        _elementor_edit_mode: 'builder'
+      };
+
+      const status = args.status || 'publish';
+      const body = {
+        title: args.title,
+        status,
+        meta
+      };
+
+      const created = await wpReq('/wp/v2/elementor_library', { method: 'POST', body });
+      if (!created || !created.id) {
+        throw new Error('Popup creation failed — POST to /wp/v2/elementor_library returned no id. The endpoint may require admin auth or Elementor Pro may not be active.');
+      }
+
+      return {
+        created: true,
+        popup_id: created.id,
+        title: created.title?.rendered || args.title,
+        status: created.status || status,
+        triggers_applied: Object.keys(popupSettings).filter(k => k.startsWith('triggers_')),
+        conditions_count: conditions.length,
+        edit_url: `${(clientConfig?.WP_API_URL || '').replace(/\/wp-json\/?$/, '')}/wp-admin/post.php?post=${created.id}&action=elementor`,
+        note: 'If the popup does not appear on the live site, open Elementor → Templates → Popups in WP admin once. Elementor Pro caches display conditions on save, and a newly-created popup may need that single UI save to register with the dispatcher.'
+      };
+    }
+
+    case 'wp_elementor_add_scoped_style': {
+      if (!args.page_id) throw new Error('page_id required');
+      if (!args.target_widget_id) throw new Error('target_widget_id required');
+      if (typeof args.css !== 'string' || args.css.trim() === '') {
+        throw new Error('css (non-empty string) required');
+      }
+      const autoScope = args.auto_scope !== false;
+      const placement = args.placement || 'end_of_parent';
+
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const previousState = extractPageState(page);
+      const tree = parseElementorData(page.meta?._elementor_data);
+
+      const targetHit = findElementById(tree, args.target_widget_id);
+      if (!targetHit) {
+        throw new Error(`Target widget ${args.target_widget_id} not found on page ${args.page_id}`);
+      }
+
+      // Default scope is the immediate parent (section/column/container) of the
+      // target widget. If the target is at root (no ancestors), scope to the
+      // target itself.
+      const scopeId = args.scope_id
+        || (targetHit.ancestors.length > 0
+            ? targetHit.ancestors[targetHit.ancestors.length - 1].id
+            : targetHit.element.id);
+
+      // Auto-scope: prefix every top-level selector with `.elementor-element-<scope>`.
+      // Naive but covers the common cases (comma-separated selectors, media queries
+      // intact). For complex CSS, the user can opt out via auto_scope:false.
+      let finalCss = args.css;
+      if (autoScope) {
+        const scopePrefix = `.elementor-element-${scopeId}`;
+        finalCss = args.css.replace(/(^|\})\s*([^{}@]+?)\s*\{/g, (match, prevChar, selectors) => {
+          if (!selectors || /^\s*$/.test(selectors)) return match;
+          if (/^@/.test(selectors)) return match;
+          const scoped = selectors.split(',').map(sel => {
+            const s = sel.trim();
+            if (!s) return s;
+            if (s.startsWith(scopePrefix)) return s;
+            return `${scopePrefix} ${s}`;
+          }).join(', ');
+          return `${prevChar} ${scoped} {`;
+        });
+      }
+
+      const widget = normalizeWidget({
+        widgetType: 'html',
+        settings: { html: `<style>\n${finalCss}\n</style>` }
+      });
+
+      let position;
+      if (placement === 'before' || placement === 'after') {
+        position = placement === 'before'
+          ? { before_id: args.target_widget_id }
+          : { after_id: args.target_widget_id };
+      } else if (placement === 'start_of_parent') {
+        position = targetHit.ancestors.length === 0
+          ? 'start'
+          : { parent_id: targetHit.ancestors[targetHit.ancestors.length - 1].id, position: 'start' };
+      } else {
+        position = targetHit.ancestors.length === 0
+          ? 'end'
+          : { parent_id: targetHit.ancestors[targetHit.ancestors.length - 1].id, position: 'end' };
+      }
+
+      const { tree: newTree, insertedId } = insertElement(tree, widget, position);
+      const serialized = JSON.stringify(newTree);
+
+      await wpReq(`/wp/v2/pages/${args.page_id}`, {
+        method: 'POST',
+        body: { meta: { _elementor_data: serialized } }
+      });
+
+      const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
+      const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
+
+      return {
+        inserted: true,
+        page_id: args.page_id,
+        style_widget_id: insertedId,
+        scope_id: scopeId,
+        auto_scope: autoScope,
+        placement,
         verified: verifyBytes === serialized.length,
         bytes_written: serialized.length,
         previous_state: previousState
