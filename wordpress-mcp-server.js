@@ -1615,6 +1615,23 @@ const tools = [
     }
   },
   {
+    name: 'wp_elementor_capabilities',
+    description: 'Discover what Elementor features are available on the site BEFORE building. Returns: elementor_version, elementor_pro (active + version), active_kit_id, container_experiment_likely (heuristic based on version), and detected popular Elementor addon plugins (UAE, Essential Addons, JetEngine, etc.). Use this to decide whether to use Pro-only widgets (form, price-table, slides, posts/loop-grid, popup) or fall back to Free alternatives.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'wp_set_static_front_page',
+    description: 'Set the WordPress homepage to a specific page (Reading Settings → "A static page"). Returns `previous_state` for rollback. Optionally also sets the "Posts page" (blog listing). Pass page_id:0 to revert to "Your latest posts".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id to use as homepage. Pass 0 to revert to latest-posts mode.', required: true },
+        posts_page_id: { type: 'number', description: 'Optional. Page id for the blog/posts listing.' }
+      },
+      required: ['page_id']
+    }
+  },
+  {
     name: 'wp_elementor_guidelines',
     description: 'Return the site\'s Elementor design guidelines: color palette, typography, layout constants, and observed common patterns. Use this BEFORE creating/modifying widgets so new content matches the site\'s style instead of using default-ugly values. Pulls from the active Elementor Kit (Site Settings) and optionally analyzes recent pages.',
     inputSchema: {
@@ -2440,6 +2457,136 @@ async function executeTool(name, args, clientConfig = null) {
         include_observed: args.include_observed !== false,
         sample_size: args.sample_size
       });
+    }
+
+    case 'wp_elementor_capabilities': {
+      // Plugin slugs we look for. The values are the brand-friendly labels we
+      // surface back. Keep this list short — the agent can probe specific
+      // plugins via wp_list_plugins if it needs more.
+      const KNOWN_ADDON_PACKS = {
+        'elementor':                         'Elementor (core)',
+        'elementor-pro':                     'Elementor Pro',
+        'header-footer-elementor':           'Header Footer Elementor (HFE)',
+        'ultimate-elementor':                'Ultimate Addons for Elementor (UAE)',
+        'premium-addons-for-elementor':      'Premium Addons for Elementor',
+        'powerpack-elements':                'PowerPack',
+        'essential-addons-for-elementor-lite': 'Essential Addons',
+        'happy-elementor-addons':            'Happy Addons',
+        'jet-engine':                        'JetEngine',
+        'jet-elements':                      'JetElements',
+        'jet-tabs':                          'JetTabs',
+        'jet-blocks':                        'JetBlocks',
+        'jet-blog':                          'JetBlog',
+        'jet-menu':                          'JetMenu',
+        'jet-popup':                         'JetPopup',
+        'jet-smart-filters':                 'JetSmartFilters',
+        'elementskit-lite':                  'ElementsKit',
+        'the-plus-addons-for-elementor':     'The Plus Addons',
+        'exclusive-addons-for-elementor':    'Exclusive Addons',
+        'master-addons':                     'Master Addons'
+      };
+
+      // Read installed plugins. /wp/v2/plugins returns entries shaped like
+      // { plugin: "elementor/elementor", status, name, version, ... }.
+      let plugins = [];
+      try {
+        plugins = await wpReq('/wp/v2/plugins?context=edit');
+      } catch (e) {
+        // Some sites lock down /wp/v2/plugins for non-admins. Continue with
+        // partial info; agent can still query other endpoints.
+      }
+      if (!Array.isArray(plugins)) plugins = [];
+
+      const detected = {};
+      let elementorVersion = null;
+      let proActive = false;
+      let proVersion = null;
+      for (const p of plugins) {
+        const slug = (p.plugin || '').split('/')[0];
+        if (!slug || !(slug in KNOWN_ADDON_PACKS)) continue;
+        detected[slug] = {
+          label: KNOWN_ADDON_PACKS[slug],
+          active: p.status === 'active',
+          version: p.version || null
+        };
+        if (slug === 'elementor' && p.status === 'active') elementorVersion = p.version || null;
+        if (slug === 'elementor-pro' && p.status === 'active') {
+          proActive = true;
+          proVersion = p.version || null;
+        }
+      }
+
+      // Active kit id, if exposed.
+      let activeKitId = null;
+      try {
+        const settings = await wpReq('/wp/v2/settings');
+        if (settings && typeof settings.elementor_active_kit === 'number') {
+          activeKitId = settings.elementor_active_kit;
+        }
+      } catch { /* settings may be locked down */ }
+
+      // Container experiment is ON by default from Elementor 3.6 (Aug 2022).
+      // A robust check requires an option read; we surface it as a heuristic.
+      const containerLikely = (() => {
+        if (!elementorVersion) return null;
+        const major = parseInt(elementorVersion.split('.')[0] || '0', 10);
+        const minor = parseInt(elementorVersion.split('.')[1] || '0', 10);
+        if (major > 3) return true;
+        if (major === 3 && minor >= 6) return true;
+        return false;
+      })();
+
+      return {
+        elementor: {
+          installed: elementorVersion !== null || ('elementor' in detected),
+          active: elementorVersion !== null,
+          version: elementorVersion
+        },
+        elementor_pro: {
+          installed: ('elementor-pro' in detected),
+          active: proActive,
+          version: proVersion
+        },
+        container_experiment_likely: containerLikely,
+        active_kit_id: activeKitId,
+        addon_packs: detected,
+        plugins_endpoint_accessible: plugins.length > 0
+      };
+    }
+
+    case 'wp_set_static_front_page': {
+      if (typeof args.page_id !== 'number') throw new Error('page_id (number) required');
+      const pageId = args.page_id;
+      const postsPageId = typeof args.posts_page_id === 'number' ? args.posts_page_id : undefined;
+
+      // Capture current state for rollback.
+      const before = await wpReq('/wp/v2/settings');
+      const previousState = {
+        show_on_front: before?.show_on_front ?? null,
+        page_on_front: before?.page_on_front ?? null,
+        page_for_posts: before?.page_for_posts ?? null
+      };
+
+      const body = {};
+      if (pageId === 0) {
+        // Revert to "Your latest posts" mode.
+        body.show_on_front = 'posts';
+        body.page_on_front = 0;
+        if (postsPageId !== undefined) body.page_for_posts = postsPageId;
+      } else {
+        body.show_on_front = 'page';
+        body.page_on_front = pageId;
+        if (postsPageId !== undefined) body.page_for_posts = postsPageId;
+      }
+
+      const after = await wpReq('/wp/v2/settings', { method: 'POST', body });
+      return {
+        updated: true,
+        mode: body.show_on_front,
+        page_on_front: after?.page_on_front ?? body.page_on_front,
+        page_for_posts: after?.page_for_posts ?? null,
+        previous_state: previousState
+      };
     }
 
     case 'wp_elementor_insert_block': {
