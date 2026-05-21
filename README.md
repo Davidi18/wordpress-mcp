@@ -205,6 +205,11 @@ Address Elementor elements by id without touching the rest of the page. Foundati
 - **`wp_elementor_duplicate_widget`** - Clone an element within the same page (ids regenerated). For card-grid patterns: build one, duplicate N, then patch each
 - **`wp_elementor_insert_widget`** - Insert a new widget at a precise location (`{ after_id }` / `{ before_id }` / `{ parent_id, position }` / "start" / "end" / integer)
 
+### Elementor Cross-Page Maintenance (2 endpoints) ✨ NEW
+Search and bulk URL-edit across many pages — the canonical maintenance workflow.
+- **`wp_elementor_find_widgets`** - Scan many pages for widgets matching `widget_type` / `text_contains` / `url_contains` / `setting_equals` (AND'd). Returns matches with page id / title / URL / widget id / snippet. Caps via `max_pages` and `max_results`.
+- **`wp_replace_link_url`** - Find/replace URLs across Elementor widget settings on one page (`post_id`) or many (`post_ids`): `link.url`, `image.url`, `background_image.url`, `*_url` strings, and array-of-record fields (icon-list items, social icons, gallery). Skips dynamic-tag fields. Supports regex, case-insensitive, `dry_run`. Returns `previous_states` keyed by page_id for rollback.
+
 ### Control Plane (4 endpoints) ✨ NEW in v2.6!
 Stateless, pure-REST, no plugin install on the target site.
 - **`wp_publish_draft_over`** - Promote a draft on top of a live page (preserves target id/URL/status). Copies content, Elementor data, page settings, featured media, SEO meta, taxonomies. Verifies the write, then deletes the draft. Returns `previous_state` for rollback.
