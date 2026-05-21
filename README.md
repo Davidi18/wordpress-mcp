@@ -197,6 +197,14 @@
 - **`wp_elementor_insert_block`** - Insert a curated block at a given position in a target page
 - **`wp_elementor_guidelines`** - Return the site's design tokens (typography scale, color palette, spacing rules) — feed this to the agent before it composes a page
 
+### Elementor Surgical Primitives (5 endpoints) ✨ NEW
+Address Elementor elements by id without touching the rest of the page. Foundational for maintenance work (e.g. "update the CTA button text on every page that has one"). All mutating tools return `previous_state` for rollback.
+- **`wp_elementor_get_page_structure`** - Compact navigable tree summary of a page (element ids + types + short text snippets, no heavy `settings`)
+- **`wp_elementor_get_widget_settings`** - Full settings of one element by id
+- **`wp_elementor_update_widget`** - Shallow-merge patch on one element's settings (or full replace via `replace_settings:true`)
+- **`wp_elementor_duplicate_widget`** - Clone an element within the same page (ids regenerated). For card-grid patterns: build one, duplicate N, then patch each
+- **`wp_elementor_insert_widget`** - Insert a new widget at a precise location (`{ after_id }` / `{ before_id }` / `{ parent_id, position }` / "start" / "end" / integer)
+
 ### Control Plane (4 endpoints) ✨ NEW in v2.6!
 Stateless, pure-REST, no plugin install on the target site.
 - **`wp_publish_draft_over`** - Promote a draft on top of a live page (preserves target id/URL/status). Copies content, Elementor data, page settings, featured media, SEO meta, taxonomies. Verifies the write, then deletes the draft. Returns `previous_state` for rollback.

@@ -10,6 +10,14 @@ import pg from 'pg';
 import { BLOCKS_MANIFEST, listBlocks, getBlock, parseElementorData, spliceBlock } from './elementor-blocks-library.js';
 import { buildGuidelines } from './elementor-guidelines.js';
 import { applyReplaceText, walkElementorReplace } from './elementor-replace-text.js';
+import {
+  findElementById,
+  patchElementById,
+  duplicateElementById,
+  insertElement,
+  normalizeWidget,
+  summarizeTree
+} from './elementor-tree.js';
 import { ELEMENTOR_META_KEYS, SEO_META_KEYS, POST_NON_TAX_FIELDS } from './wp-meta-keys.js';
 import {
   requireApiKey,
@@ -1639,6 +1647,81 @@ const tools = [
     }
   },
 
+  // ── SURGICAL PRIMITIVES — address Elementor elements by id ──
+  // Inspect, patch, duplicate, or insert a single element without touching the
+  // rest of the page. Mutating tools return `previous_state` for rollback.
+  {
+    name: 'wp_elementor_get_page_structure',
+    description: 'Return a compact navigable summary of a page\'s Elementor tree: every element\'s id, elType, widgetType, and a short text snippet — without the heavy `settings` payload. Use this BEFORE wp_elementor_update_widget / wp_elementor_duplicate_widget so you know which id to act on. Much cheaper than parsing the full _elementor_data.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id', required: true },
+        max_snippet_length: { type: 'number', description: 'Max chars per widget snippet (default 80)', default: 80 }
+      },
+      required: ['page_id']
+    }
+  },
+  {
+    name: 'wp_elementor_get_widget_settings',
+    description: 'Read the full settings of a single Elementor element by id. Works for any element (widget, column, section, container) — use wp_elementor_get_page_structure first to find the id you need.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id', required: true },
+        element_id: { type: 'string', description: 'Element id (8-char hex from get_page_structure)', required: true }
+      },
+      required: ['page_id', 'element_id']
+    }
+  },
+  {
+    name: 'wp_elementor_update_widget',
+    description: 'Patch the settings of a single Elementor element (widget, section, column, or container). Default behavior is a SHALLOW merge into existing settings — settings_patch keys overwrite, untouched keys are preserved. Pass replace_settings:true to swap the entire settings object instead. Returns `previous_state` for rollback.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id', required: true },
+        element_id: { type: 'string', description: 'Element id', required: true },
+        settings_patch: { type: 'object', description: 'Settings to merge (or replace) into the element. Top-level keys overwrite existing same-named keys in the element\'s settings object.', required: true },
+        replace_settings: { type: 'boolean', description: 'If true, replace the settings object entirely instead of shallow-merging.', default: false }
+      },
+      required: ['page_id', 'element_id', 'settings_patch']
+    }
+  },
+  {
+    name: 'wp_elementor_duplicate_widget',
+    description: 'Duplicate an element (widget, section, column, container) within the same page. Ids are regenerated for the clone and any descendants. Default position is "after" (right after the original, in the same parent). Use this for card-grid patterns: build one card, duplicate N times, then patch each copy.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id', required: true },
+        element_id: { type: 'string', description: 'Element id to duplicate', required: true },
+        position: { type: 'string', enum: ['after', 'before', 'start', 'end'], description: '"after" / "before" (relative to original, same parent), or "start" / "end" (of the parent container).', default: 'after' }
+      },
+      required: ['page_id', 'element_id']
+    }
+  },
+  {
+    name: 'wp_elementor_insert_widget',
+    description: 'Insert a new Elementor element (typically a single widget) into a page at a precise location. Use this for surgical additions: a shortcode mid-page, an HTML widget with scoped CSS next to a target, an extra button in an existing column. For multi-section blocks, prefer wp_elementor_insert_block.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id', required: true },
+        widget: {
+          type: 'object',
+          description: 'Widget config: { widgetType: "shortcode" | "heading" | "button" | ... , settings: {...} }. elType defaults to "widget". Optional `elements: []` for nested children. id is auto-generated.',
+          required: true
+        },
+        position: {
+          description: 'Insertion target. Strings "start" / "end" or an integer = root-level position. Object forms: { after_id: "abc12345" } / { before_id: "abc12345" } = sibling of that element; { parent_id: "col1", position: "end"|"start"|N } = inside that parent.',
+          required: true
+        }
+      },
+      required: ['page_id', 'widget', 'position']
+    }
+  },
+
   // ── CONTROL PLANE (publish-draft-over / replace-text / restore-page-state) ──
   // Pure REST — no plugin installation on the WordPress site required.
   // Stateless: destructive ops return a full `previous_state` in their response
@@ -2468,6 +2551,147 @@ async function executeTool(name, args, clientConfig = null) {
         sections_added: block.content.length,
         total_sections: merged.length,
         position
+      };
+    }
+
+    // ── SURGICAL PRIMITIVES ──
+    case 'wp_elementor_get_page_structure': {
+      if (!args.page_id) throw new Error('page_id required');
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,title,meta`);
+      const tree = parseElementorData(page.meta?._elementor_data);
+      const summary = summarizeTree(tree, { max_snippet_length: args.max_snippet_length });
+      return {
+        page_id: page.id,
+        page_title: page.title?.rendered || '',
+        stats: summary.stats,
+        tree: summary.tree
+      };
+    }
+
+    case 'wp_elementor_get_widget_settings': {
+      if (!args.page_id) throw new Error('page_id required');
+      if (!args.element_id) throw new Error('element_id required');
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
+      const tree = parseElementorData(page.meta?._elementor_data);
+      const hit = findElementById(tree, args.element_id);
+      if (!hit) throw new Error(`Element ${args.element_id} not found on page ${args.page_id}`);
+      return {
+        page_id: page.id,
+        element_id: hit.element.id,
+        elType: hit.element.elType,
+        widgetType: hit.element.widgetType || null,
+        settings: hit.element.settings || {},
+        child_count: Array.isArray(hit.element.elements) ? hit.element.elements.length : 0,
+        ancestors_ids: hit.ancestors.map(a => a.id)
+      };
+    }
+
+    case 'wp_elementor_update_widget': {
+      if (!args.page_id) throw new Error('page_id required');
+      if (!args.element_id) throw new Error('element_id required');
+      if (!args.settings_patch || typeof args.settings_patch !== 'object') {
+        throw new Error('settings_patch (object) required');
+      }
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const previousState = extractPageState(page);
+      const tree = parseElementorData(page.meta?._elementor_data);
+
+      const hit = findElementById(tree, args.element_id);
+      if (!hit) throw new Error(`Element ${args.element_id} not found on page ${args.page_id}`);
+
+      const beforeSettings = hit.element.settings || {};
+      const newTree = patchElementById(tree, args.element_id, (el) => ({
+        ...el,
+        settings: args.replace_settings
+          ? { ...args.settings_patch }
+          : { ...el.settings, ...args.settings_patch }
+      }));
+      if (!newTree) throw new Error('Patch failed unexpectedly');
+
+      const serialized = JSON.stringify(newTree);
+      await wpReq(`/wp/v2/pages/${args.page_id}`, {
+        method: 'POST',
+        body: { meta: { _elementor_data: serialized } }
+      });
+
+      const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
+      const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
+      const verified = verifyBytes === serialized.length;
+
+      return {
+        updated: true,
+        page_id: args.page_id,
+        element_id: args.element_id,
+        verified,
+        bytes_written: serialized.length,
+        changed_keys: args.replace_settings
+          ? Object.keys(args.settings_patch)
+          : Object.keys(args.settings_patch).filter(k => beforeSettings[k] !== args.settings_patch[k]),
+        previous_state: previousState
+      };
+    }
+
+    case 'wp_elementor_duplicate_widget': {
+      if (!args.page_id) throw new Error('page_id required');
+      if (!args.element_id) throw new Error('element_id required');
+      const where = args.position || 'after';
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const previousState = extractPageState(page);
+      const tree = parseElementorData(page.meta?._elementor_data);
+
+      const { tree: newTree, duplicateId } = duplicateElementById(tree, args.element_id, where);
+      if (!duplicateId) throw new Error(`Element ${args.element_id} not found on page ${args.page_id}`);
+
+      const serialized = JSON.stringify(newTree);
+      await wpReq(`/wp/v2/pages/${args.page_id}`, {
+        method: 'POST',
+        body: { meta: { _elementor_data: serialized } }
+      });
+
+      const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
+      const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
+
+      return {
+        duplicated: true,
+        page_id: args.page_id,
+        source_id: args.element_id,
+        new_id: duplicateId,
+        position: where,
+        verified: verifyBytes === serialized.length,
+        bytes_written: serialized.length,
+        previous_state: previousState
+      };
+    }
+
+    case 'wp_elementor_insert_widget': {
+      if (!args.page_id) throw new Error('page_id required');
+      if (!args.widget) throw new Error('widget (object) required');
+      if (args.position === undefined) throw new Error('position required');
+
+      const widget = normalizeWidget(args.widget);
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const previousState = extractPageState(page);
+      const tree = parseElementorData(page.meta?._elementor_data);
+
+      const { tree: newTree, insertedId } = insertElement(tree, widget, args.position);
+      const serialized = JSON.stringify(newTree);
+
+      await wpReq(`/wp/v2/pages/${args.page_id}`, {
+        method: 'POST',
+        body: { meta: { _elementor_data: serialized } }
+      });
+
+      const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
+      const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
+
+      return {
+        inserted: true,
+        page_id: args.page_id,
+        element_id: insertedId,
+        widgetType: widget.widgetType || null,
+        verified: verifyBytes === serialized.length,
+        bytes_written: serialized.length,
+        previous_state: previousState
       };
     }
 
