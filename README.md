@@ -196,6 +196,7 @@
 - **`wp_elementor_get_block`** - Get the JSON for one curated block (drop-in for `wp_elementor_insert_block`)
 - **`wp_elementor_insert_block`** - Insert a curated block at a given position in a target page
 - **`wp_elementor_guidelines`** - Return the site's design tokens (typography scale, color palette, spacing rules) — feed this to the agent before it composes a page
+- **`wp_elementor_update_kit`** - Write to the active Elementor Kit (Site Settings → Global Colors / Fonts / Layout). Updates system colors (primary/secondary/text/accent), custom named colors, system & custom typography presets, and layout knobs. Changes cascade to every widget that uses a global token (`__globals__.color = "globals/colors?id=primary"` pattern). Supports `dry_run` for preview. Returns `previous_state` for rollback. **Note**: widgets with hard-coded hex values do NOT pick up Kit changes — that's an Elementor limitation; use `wp_replace_text` to migrate them, or rebind them to globals first.
 
 ### Control Plane (4 endpoints) ✨ NEW in v2.6!
 Stateless, pure-REST, no plugin install on the target site.
