@@ -338,16 +338,45 @@ export function summarizeTree(tree, { max_snippet_length = 80 } = {}) {
   return { stats, tree: nodes };
 }
 
+// Recurse a settings object collecting every URL value (from {url:...} containers,
+// _url-suffixed string keys, and arrays of records). Used by the url_contains
+// filter below and by external consumers that want to inspect URLs.
+export function collectUrls(settings) {
+  const urls = [];
+  if (!settings || typeof settings !== 'object') return urls;
+  function walkObj(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === 'string' && k.endsWith('_url')) {
+        urls.push(v);
+        continue;
+      }
+      if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.url === 'string') {
+        urls.push(v.url);
+        continue;
+      }
+      if (Array.isArray(v)) {
+        for (const item of v) walkObj(item);
+      }
+    }
+  }
+  walkObj(settings);
+  return urls;
+}
+
 // Search the tree for widgets matching the given criteria. Used by both the
 // per-page primitive and the cross-page wp_elementor_find_widgets tool.
 // Filters:
-//   widget_type — exact match on widgetType
-//   text_contains — case-insensitive substring on any text field
+//   widget_type    — exact match on widgetType
+//   text_contains  — case-insensitive substring on any text field
+//   url_contains   — case-insensitive substring on any URL field (link.url,
+//                    image.url, background_image.url, *_url strings, arrays)
 //   setting_equals — { key: value } — strict equality on settings[key]
-// Returns an array of { id, widgetType, settings, ancestors_ids, snippet }.
-export function findWidgets(tree, { widget_type, text_contains, setting_equals } = {}, { max_snippet_length = 80 } = {}) {
+// Returns an array of { id, widgetType, ancestors_ids, snippet }.
+export function findWidgets(tree, { widget_type, text_contains, url_contains, setting_equals } = {}, { max_snippet_length = 80 } = {}) {
   if (!Array.isArray(tree)) return [];
   const needle = text_contains ? String(text_contains).toLowerCase() : null;
+  const urlNeedle = url_contains ? String(url_contains).toLowerCase() : null;
   const setKeys = setting_equals ? Object.keys(setting_equals) : null;
   const TEXT_KEYS = ['title','editor','text','description','description_text','title_text','caption','html','button_text','testimonial_content','testimonial_name','testimonial_job','heading','sub_heading','tab_title','tab_content','shortcode','alert_title'];
   const matches = [];
@@ -371,6 +400,10 @@ export function findWidgets(tree, { widget_type, text_contains, setting_equals }
             return false;
           });
           if (!hit) ok = false;
+        }
+        if (ok && urlNeedle) {
+          const urls = collectUrls(el.settings);
+          if (!urls.some(u => u.toLowerCase().includes(urlNeedle))) ok = false;
         }
         if (ok && setKeys) {
           for (const k of setKeys) {

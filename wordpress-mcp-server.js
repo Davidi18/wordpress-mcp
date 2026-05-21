@@ -16,8 +16,10 @@ import {
   duplicateElementById,
   insertElement,
   normalizeWidget,
-  summarizeTree
+  summarizeTree,
+  findWidgets
 } from './elementor-tree.js';
+import { walkElementorReplaceLinkUrls } from './elementor-replace-links.js';
 import { ELEMENTOR_META_KEYS, SEO_META_KEYS, POST_NON_TAX_FIELDS } from './wp-meta-keys.js';
 import {
   requireApiKey,
@@ -1722,6 +1724,47 @@ const tools = [
     }
   },
 
+  // ── CROSS-PAGE PRIMITIVES ──
+  // Search and bulk URL-edit across many pages. Built on the same tree walker
+  // used by the surgical primitives.
+  {
+    name: 'wp_elementor_find_widgets',
+    description: 'Search for Elementor widgets across many pages. Returns a flat list of matches with their containing page id/title/URL. Foundational for cross-page maintenance: "find every button that links to /old-url", "every icon-box mentioning phone 050-", "every form widget across the site". Filter by widget_type, text_contains, url_contains, and/or setting_equals; pass them together to AND them.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        widget_type:    { type: 'string',  description: 'Exact widgetType (e.g. "button", "icon-box", "form").' },
+        text_contains:  { type: 'string',  description: 'Case-insensitive substring across text fields (title/editor/button text/description/testimonial/tab title/etc).' },
+        url_contains:   { type: 'string',  description: 'Case-insensitive substring across URL fields (link.url, image.url, background_image.url, *_url strings).' },
+        setting_equals: { type: 'object',  description: 'Strict equality on top-level settings keys: { key: value, ... }.' },
+
+        post_type: { type: 'string',     description: 'WP post type to search.', default: 'pages' },
+        status:    { type: 'string',     description: 'publish / draft / any', default: 'publish' },
+        page_ids:  { type: 'array',      description: 'If set, scan only these page ids (skips discovery query).' },
+        per_page:  { type: 'number',     description: 'Page fetch batch size.', default: 50 },
+        max_pages: { type: 'number',     description: 'Hard cap on pages to scan.', default: 200 },
+        max_results: { type: 'number',   description: 'Hard cap on matches returned.', default: 500 }
+      }
+    }
+  },
+  {
+    name: 'wp_replace_link_url',
+    description: 'Find/replace URLs across Elementor widget settings on one or many pages: link.url, image.url, background_image.url, lightbox_image.url, *_url string fields, and array-of-record fields (icon-list items, social icons, gallery, image-carousel). Use this for URL migrations (e.g. /contact → /contact-us). Skips dynamic-tag fields. Supports regex, case-insensitive, and dry_run preview. On real (non-dry) writes, returns `previous_states` keyed by page_id so any subset can be reverted via wp_restore_page_state.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        post_id:  { type: 'number', description: 'Single page id — use for a focused edit. Mutually exclusive with post_ids.' },
+        post_ids: { type: 'array',  description: 'Multiple page ids — batch operation. Mutually exclusive with post_id.' },
+        find:     { type: 'string', description: 'Literal substring (default) or regex pattern (when regex:true). Required.', required: true },
+        replace:  { type: 'string', description: 'Replacement string. Defaults to empty string.', default: '' },
+        regex:    { type: 'boolean', description: 'Treat `find` as a regex pattern.', default: false },
+        case_insensitive: { type: 'boolean', description: 'Case-insensitive match.', default: false },
+        dry_run:  { type: 'boolean', description: 'Preview matches and counts without writing.', default: false }
+      },
+      required: ['find']
+    }
+  },
+
   // ── CONTROL PLANE (publish-draft-over / replace-text / restore-page-state) ──
   // Pure REST — no plugin installation on the WordPress site required.
   // Stateless: destructive ops return a full `previous_state` in their response
@@ -2692,6 +2735,177 @@ async function executeTool(name, args, clientConfig = null) {
         verified: verifyBytes === serialized.length,
         bytes_written: serialized.length,
         previous_state: previousState
+      };
+    }
+
+    // ── CROSS-PAGE PRIMITIVES ──
+    case 'wp_elementor_find_widgets': {
+      const filters = {
+        widget_type:    args.widget_type,
+        text_contains:  args.text_contains,
+        url_contains:   args.url_contains,
+        setting_equals: args.setting_equals
+      };
+      const postType = args.post_type || 'pages';
+      const status   = args.status || 'publish';
+      const perPage  = Math.max(1, Math.min(args.per_page || 50, 100));
+      const maxPages = Math.max(1, Math.min(args.max_pages || 200, 1000));
+      const maxResults = Math.max(1, Math.min(args.max_results || 500, 5000));
+
+      // Discover page ids if not provided.
+      let pageIds;
+      if (Array.isArray(args.page_ids) && args.page_ids.length > 0) {
+        pageIds = args.page_ids.slice(0, maxPages);
+      } else {
+        pageIds = [];
+        let page = 1;
+        while (pageIds.length < maxPages) {
+          const batch = await wpReq(`/wp/v2/${postType}?per_page=${perPage}&page=${page}&status=${status}&_fields=id`);
+          if (!Array.isArray(batch) || batch.length === 0) break;
+          for (const p of batch) {
+            if (p?.id) pageIds.push(p.id);
+            if (pageIds.length >= maxPages) break;
+          }
+          if (batch.length < perPage) break;
+          page++;
+        }
+      }
+
+      // Scan pages in small concurrent batches. Each page is one ?context=edit
+      // fetch so we get meta._elementor_data.
+      const matches = [];
+      let truncated = false;
+      let scanned = 0;
+      const CONCURRENCY = 5;
+      outer: for (let i = 0; i < pageIds.length; i += CONCURRENCY) {
+        const chunk = pageIds.slice(i, i + CONCURRENCY);
+        const pages = await Promise.all(chunk.map(id =>
+          wpReq(`/wp/v2/${postType}/${id}?context=edit&_fields=id,title,link,meta`).catch(() => null)
+        ));
+        for (const page of pages) {
+          scanned++;
+          if (!page || !page.id) continue;
+          const tree = parseElementorData(page.meta?._elementor_data);
+          if (tree.length === 0) continue;
+          const hits = findWidgets(tree, filters);
+          for (const m of hits) {
+            matches.push({
+              page_id: page.id,
+              page_title: page.title?.rendered || page.title?.raw || '',
+              page_url: page.link || null,
+              widget_id: m.id,
+              widget_type: m.widgetType,
+              ancestors_ids: m.ancestors_ids,
+              snippet: m.snippet
+            });
+            if (matches.length >= maxResults) {
+              truncated = true;
+              break outer;
+            }
+          }
+        }
+      }
+
+      return {
+        pages_total: pageIds.length,
+        pages_scanned: scanned,
+        total_matches: matches.length,
+        truncated,
+        filters,
+        matches
+      };
+    }
+
+    case 'wp_replace_link_url': {
+      const find = args.find;
+      const replace = args.replace ?? '';
+      const regex = args.regex === true;
+      const ci = args.case_insensitive === true;
+      const dryRun = args.dry_run === true;
+      if (typeof find !== 'string' || find === '') throw new Error('find (non-empty string) required');
+
+      // Resolve target page ids — single or batch.
+      let pageIds;
+      if (Array.isArray(args.post_ids) && args.post_ids.length > 0) {
+        if (args.post_id) throw new Error('Pass post_id OR post_ids, not both');
+        pageIds = args.post_ids;
+      } else if (args.post_id) {
+        pageIds = [args.post_id];
+      } else {
+        throw new Error('post_id or post_ids required');
+      }
+
+      const perPageResults = [];
+      const previousStates = {};
+
+      for (const pageId of pageIds) {
+        const page = await wpReq(`/wp/v2/pages/${pageId}?context=edit`);
+        if (!page || !page.id) {
+          perPageResults.push({ post_id: pageId, error: 'page not found' });
+          continue;
+        }
+        const rawElementor = page.meta?._elementor_data;
+        if (typeof rawElementor !== 'string' || rawElementor === '') {
+          perPageResults.push({ post_id: pageId, replacements: 0, urls: {}, skipped: 'no elementor data' });
+          continue;
+        }
+
+        let tree;
+        try { tree = JSON.parse(rawElementor); } catch { tree = null; }
+        if (!Array.isArray(tree)) {
+          perPageResults.push({ post_id: pageId, error: 'invalid elementor data' });
+          continue;
+        }
+
+        // Use a deep clone for the walker (it mutates in place).
+        const workCopy = JSON.parse(rawElementor);
+        const counter = { replacements: 0, urls: {} };
+        walkElementorReplaceLinkUrls(workCopy, find, replace, regex, ci, counter);
+
+        if (counter.replacements === 0) {
+          perPageResults.push({ post_id: pageId, replacements: 0, urls: {} });
+          continue;
+        }
+
+        if (dryRun) {
+          perPageResults.push({ post_id: pageId, replacements: counter.replacements, urls: counter.urls, dry_run: true });
+          continue;
+        }
+
+        const previousState = extractPageState(page);
+        const newSerialized = JSON.stringify(workCopy);
+        await wpReq(`/wp/v2/pages/${pageId}`, {
+          method: 'POST',
+          body: { meta: { _elementor_data: newSerialized } }
+        });
+        const verify = await wpReq(`/wp/v2/pages/${pageId}?context=edit&_fields=id,meta`);
+        const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
+        const verified = verifyBytes === newSerialized.length;
+
+        previousStates[pageId] = previousState;
+        perPageResults.push({
+          post_id: pageId,
+          replacements: counter.replacements,
+          urls: counter.urls,
+          verified,
+          bytes_written: newSerialized.length
+        });
+      }
+
+      const total = perPageResults.reduce((sum, r) => sum + (r.replacements || 0), 0);
+      const pagesAffected = perPageResults.filter(r => (r.replacements || 0) > 0).length;
+
+      return {
+        find,
+        replace,
+        regex,
+        case_insensitive: ci,
+        dry_run: dryRun,
+        total_replacements: total,
+        pages_processed: perPageResults.length,
+        pages_affected: pagesAffected,
+        per_page: perPageResults,
+        ...(dryRun ? {} : { previous_states: previousStates })
       };
     }
 
