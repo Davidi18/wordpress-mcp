@@ -375,6 +375,49 @@ function normalizeRequestOptions(options = {}) {
   return normalized;
 }
 
+function previewText(text, max = 500) {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+function parseWordPressJsonOrThrow({ text, response, url, clientName = 'default' }) {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch (e) {
+    const contentType = response.headers?.get?.('content-type') || 'unknown';
+    const preview = previewText(text);
+    throw new Error(
+      `Invalid JSON from WordPress REST for client "${clientName}" ` +
+      `(status ${response.status}, content-type ${contentType}, url ${url}): ${preview}`
+    );
+  }
+}
+
+function isSafeRoutingMethod(method) {
+  return method === 'initialize' || method === 'tools/list' || (method && method.startsWith('notifications/'));
+}
+
+async function requireExplicitClientRouting(args, method) {
+  if (isSafeRoutingMethod(method)) return;
+  if (args && (args.client || args.site_url)) return;
+
+  const clients = await getAllClientConfigs();
+  if (clients.length <= 1) return;
+
+  const available = clients
+    .map(c => `${c.id}${c.domain ? ` (${c.domain})` : ''}`)
+    .join(', ');
+
+  throw new Error(
+    'Client routing required for WordPress MCP tools/call. ' +
+    'Pass a client argument such as client="caio-co-il", or use a client-specific Hermes profile with ' +
+    'mcp_servers.wordpress.default_arguments.client configured. ' +
+    `Available clients: [${available}]`
+  );
+}
+
 async function wpRequest(endpoint, options = {}) {
   let url = `${wpApiBase}${endpoint}`;
 
@@ -404,12 +447,7 @@ async function wpRequest(endpoint, options = {}) {
   });
 
   const text = await response.text();
-  let data;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch (e) {
-    throw new Error(`Invalid JSON from WordPress: ${text.substring(0, 100)}`);
-  }
+  const data = parseWordPressJsonOrThrow({ text, response, url, clientName: initConfig.name || 'default' });
 
   if (!response.ok) {
     throw new Error(`WordPress API error (${response.status}): ${JSON.stringify(data)}`);
@@ -454,12 +492,7 @@ function createWpRequestForClient(clientConfig) {
     });
 
     const text = await response.text();
-    let data;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch (e) {
-      throw new Error(`Invalid JSON from WordPress: ${text.substring(0, 100)}`);
-    }
+    const data = parseWordPressJsonOrThrow({ text, response, url, clientName: clientConfig.name || 'unknown' });
 
     if (!response.ok) {
       throw new Error(`WordPress API error (${response.status}): ${JSON.stringify(data)}`);
@@ -2617,6 +2650,7 @@ async function executeTool(name, args, clientConfig = null) {
         previous_state: previousState
       };
     }
+
 
     case 'wp_elementor_insert_block': {
       const block = await getBlock(args.block_id);
@@ -5109,7 +5143,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (method === 'tools/call') {
-      const { name, arguments: args } = params;
+      const { name, arguments: rawArgs } = params;
+      const args = rawArgs && typeof rawArgs === 'object' ? rawArgs : {};
+
+      // Flatten nested arguments before routing checks. Some MCP clients wrap
+      // tool arguments under an extra `arguments` object.
+      if (args.arguments && typeof args.arguments === 'object') {
+        Object.assign(args, args.arguments);
+        delete args.arguments;
+      }
+
+      await requireExplicitClientRouting(args, method);
 
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('🪵 TOOL CALL:', name);
@@ -5118,33 +5162,21 @@ const server = http.createServer(async (req, res) => {
 
       // Handle client parameter for multi-site
       let clientConfig = null;
-      // Support site_url as alias for client (e.g. site_url:"https://caio.co.il" → client:"caio-co-il")
-      if (args && args.site_url && !args.client) {
-        const domain = args.site_url.replace(/^https?:\/\//, '').replace(/\/$/, '');
-        args.client = domain.replace(/\./g, '-'); // caio.co.il → caio-co-il
-        delete args.site_url;
-      }
-      if (args && args.client) {
-        clientConfig = await getClientConfig(args.client);
-        delete args.client; // Remove from args after extracting
-      }
-
-      // Handle site_url as client identifier (convert domain to client id)
-      if (args && args.site_url && !clientConfig) {
-        const siteUrl = args.site_url;
-        const domain = siteUrl.replace(/^https?:\/\/(www\.)?/, '').replace(/\/+$/, '').replace(/\./g, '-');
-        try {
-          clientConfig = await getClientConfig(domain);
-        } catch(e) {
-          console.log(`site_url client lookup failed for "${domain}": ${e.message}`);
+      // Support site_url as alias for client. Prefer DB/domain detection over
+      // naive slug conversion so www/subpath URLs still route correctly.
+      if (args.site_url && !args.client) {
+        const detectedClient = await detectClientByDomain(args.site_url);
+        if (detectedClient) {
+          args.client = detectedClient;
+        } else {
+          const domain = extractDomain(args.site_url);
+          args.client = domain.replace(/\./g, '-'); // caio.co.il → caio-co-il
         }
         delete args.site_url;
       }
-
-      // Flatten nested arguments
-      if (args && args.arguments && typeof args.arguments === 'object') {
-        Object.assign(args, args.arguments);
-        delete args.arguments;
+      if (args.client) {
+        clientConfig = await getClientConfig(args.client);
+        delete args.client; // Remove from args after extracting
       }
 
       // Normalize ID fields
@@ -5175,7 +5207,11 @@ const server = http.createServer(async (req, res) => {
     }));
 
   } catch (error) {
-    res.writeHead(500, { 'Content-Type': 'application/json' });
+    // Per JSON-RPC/MCP conventions, tool execution failures should be encoded
+    // in the JSON-RPC error body, not as transport-level HTTP 500s. Some MCP
+    // clients treat HTTP 500 as a transport failure and may hang/retry instead
+    // of surfacing the actionable error message.
+    res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       jsonrpc: '2.0',
       id: '1',

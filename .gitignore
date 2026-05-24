@@ -38,6 +38,7 @@ coverage/
 *.backup
 *.bak
 *~
+_live_snapshot/
 
 # SSL certificates (if storing locally)
 ssl/
