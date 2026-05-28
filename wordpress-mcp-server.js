@@ -5063,6 +5063,41 @@ const server = http.createServer(async (req, res) => {
   // Enforce auth before parsing the body — covers initialize/tools/list/tools/call
   if (!requireApiKey(req, res, API_KEY)) return;
 
+  // Hoisted so the outer catch can route errors through the same response
+  // channel as success. Otherwise a thrown error during tools/call (e.g.
+  // requireExplicitClientRouting, getClientConfig "Client not found") is
+  // written to the POST body as application/json, while the MCP client is
+  // listening on the SSE stream for a response with the original id — it
+  // never sees the error and times out (120s).
+  const acceptsSSE = (req.headers['accept'] || '').includes('text/event-stream');
+  const mcpSessionId = req.headers['mcp-session-id'];
+  const remoteIp = req.socket.remoteAddress;
+  const sseStream = (mcpSessionId && sseSessions.get(mcpSessionId)) || sseByIp.get(remoteIp) || null;
+  let requestId = null;
+
+  // Send JSON-RPC payload via SSE stream or direct response, matching the
+  // success path so error and result share the same transport.
+  function sendJsonRpc(payload) {
+    const jsonResult = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    if (res.headersSent || res.writableEnded) return;
+    if (sseStream) {
+      sseStream.write(`data: ${jsonResult}\n\n`);
+      res.writeHead(202);
+      res.end();
+    } else if (acceptsSSE) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      });
+      res.write(`data: ${jsonResult}\n\n`);
+      res.end();
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(jsonResult);
+    }
+  }
+
   try {
     let body;
     try {
@@ -5082,34 +5117,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     const { method, params, id } = body;
+    requestId = id;
 
-    const acceptsSSE = (req.headers['accept'] || '').includes('text/event-stream');
-    const mcpSessionId = req.headers['mcp-session-id'];
-    const remoteIp = req.socket.remoteAddress;
-    const sseStream = (mcpSessionId && sseSessions.get(mcpSessionId)) || sseByIp.get(remoteIp) || null;
-
-    // Helper: send JSON-RPC result via SSE stream or direct JSON response
-    function sendResult(jsonResult) {
-      if (sseStream) {
-        // SSE session mode — push to open SSE stream, return 202
-        sseStream.write(`data: ${jsonResult}\n\n`);
-        res.writeHead(202);
-        res.end();
-      } else if (acceptsSSE) {
-        // StreamableHTTP mode — SSE as direct response
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive'
-        });
-        res.write(`data: ${jsonResult}\n\n`);
-        res.end();
-      } else {
-        // Direct JSON mode (fallback)
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(jsonResult);
-      }
-    }
+    const sendResult = sendJsonRpc;
 
     // Acknowledge notifications silently (no response needed per MCP spec)
     if (method && method.startsWith('notifications/')) {
@@ -5207,16 +5217,15 @@ const server = http.createServer(async (req, res) => {
     }));
 
   } catch (error) {
-    // Per JSON-RPC/MCP conventions, tool execution failures should be encoded
-    // in the JSON-RPC error body, not as transport-level HTTP 500s. Some MCP
-    // clients treat HTTP 500 as a transport failure and may hang/retry instead
-    // of surfacing the actionable error message.
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
+    // Route errors through the same channel as success (SSE if the client is
+    // listening there) and echo the original JSON-RPC id, so MCP clients can
+    // correlate and surface the error instead of waiting for a response on
+    // the SSE stream that never arrives.
+    sendJsonRpc({
       jsonrpc: '2.0',
-      id: '1',
+      id: requestId ?? null,
       error: { code: -32603, message: error.message }
-    }));
+    });
   }
 });
 
