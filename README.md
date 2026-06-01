@@ -2,7 +2,10 @@
 
 ## 🎉 What's New in v2.7
 
-- 🖋️ **Reliable Elementor writes** — every tool that writes `_elementor_data` now routes through a privileged `agency-os/v1/elementor-data` mu-plugin endpoint that does a direct `update_post_meta` behind an `edit_post` capability check. This sidesteps core REST's refusal to write the protected `_elementor_data` postmeta (reads always worked; writes used to fail). If the route isn't installed, writes transparently fall back to the core meta write. Run `wp_bootstrap_file_api` (or `force: true`) to install/upgrade the mu-plugin; `wp_check_file_api` now reports whether the Elementor write route is present.
+- 🖋️ **Reliable Elementor writes** — every tool that writes `_elementor_data` now routes through a privileged `agency-os/v1/elementor-data` endpoint that does a direct `update_post_meta` behind an `edit_post` capability check. This sidesteps core REST's refusal to write the protected `_elementor_data` postmeta (reads always worked; writes used to fail). If the route isn't installed, writes transparently fall back to the core meta write.
+  - **Recommended install (no mu-plugin):** run `wp_bootstrap_elementor_writer` — it registers the route inside an **active Code Snippet**, so there's no file written to disk and no mu-plugin. Idempotent; re-running just refreshes the snippet.
+  - The same route is also bundled into the Agency OS File API mu-plugin, so sites that already ran `wp_bootstrap_file_api` get it for free (run it again, or with `force: true`, to upgrade an older install).
+  - `wp_check_file_api` reports whether the Elementor write route is present (`elementor_write_route`).
 - ✂️ **Page excerpt support** — `wp_update_page` and `wp_create_page` now accept `excerpt`. Passing `excerpt: ""` to `wp_update_page` cleanly clears an existing excerpt (previously there was no way to delete a page excerpt via MCP).
 - 🧩 **Code Snippets management** — new `wp_list_snippets` / `wp_get_snippet` / `wp_create_snippet` / `wp_update_snippet` / `wp_activate_snippet` / `wp_deactivate_snippet` / `wp_delete_snippet` wrap the Code Snippets plugin REST API, so agents can install a guard snippet (or any PHP/JS/CSS snippet) without shipping an mu-plugin.
 
@@ -154,6 +157,7 @@
 - **`wp_bootstrap_plugin_installer`** - Setup ZIP installer API
 
 ### File API & Code Snippets ✨ v2.7
+- **`wp_bootstrap_elementor_writer`** - Install the privileged Elementor write route as an **active Code Snippet** (no mu-plugin, no file write) — recommended
 - **`wp_create_file`** - Write a file to allowed dirs (mu-plugins, uploads) via the Agency OS File API
 - **`wp_bootstrap_file_api`** - Auto-install/upgrade the Agency OS mu-plugin (File API + privileged Elementor write route)
 - **`wp_check_file_api`** - Report whether the File API and Elementor write route are installed

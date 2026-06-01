@@ -571,7 +571,10 @@ async function writeElementorData(wpReq, pageId, data) {
     });
     return { via: 'privileged', bytes: res?.bytes ?? serialized.length };
   } catch (error) {
-    const notInstalled = /\(404\)/.test(error.message) || /rest_no_route/.test(error.message);
+    // Only fall back when the route itself is absent (rest_no_route). A plain
+    // 404 from the route means "post not found" — a real error we must surface,
+    // not a missing endpoint, so we don't mask it with a core write attempt.
+    const notInstalled = /rest_no_route/.test(error.message);
     if (notInstalled) {
       await wpReq(`/wp/v2/pages/${pageId}`, {
         method: 'POST',
@@ -1247,6 +1250,16 @@ const tools = [
         id: { type: 'number', description: 'Snippet ID', required: true }
       },
       required: ['id']
+    }
+  },
+  {
+    name: 'wp_bootstrap_elementor_writer',
+    description: 'Install the privileged Elementor write route (agency-os/v1/elementor-data) as an ACTIVE Code Snippet — no mu-plugin and no file write required. This is the recommended way to enable reliable _elementor_data writes (core REST refuses to write that protected meta). Idempotent: if the route is already live it does nothing; otherwise it creates/updates a global active snippet that registers the route. Requires the "Code Snippets" plugin.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        force: { type: 'boolean', description: 'Reinstall/refresh the snippet even if the route already responds', default: false }
+      }
     }
   },
 
@@ -4151,6 +4164,110 @@ async function executeTool(name, args, clientConfig = null) {
       return { deleted: true, id: args.id };
     }
 
+    case 'wp_bootstrap_elementor_writer': {
+      const force = args.force || false;
+      const steps = [];
+
+      // Treat anything other than rest_no_route as "route is live".
+      const routeLive = async () => {
+        try {
+          await wpReq('/agency-os/v1/elementor-data', { method: 'POST', body: JSON.stringify({}) });
+          return true;
+        } catch (error) {
+          return !error.message.includes('rest_no_route');
+        }
+      };
+
+      if (!force && await routeLive()) {
+        return { success: true, message: 'Elementor write route already installed', steps: ['Route is responding'] };
+      }
+
+      // The route is registered directly inside an active global snippet — no
+      // mu-plugin, no file write. The function_exists guard avoids a fatal
+      // redeclare if the File API mu-plugin also defines it on the same site.
+      const snippetName = 'Agency OS Elementor Writer';
+      const snippetCode = `if (!defined('ABSPATH')) exit;
+
+add_action('rest_api_init', function() {
+    register_rest_route('agency-os/v1', '/elementor-data', [
+        'methods' => 'POST',
+        'callback' => 'agency_os_set_elementor_data',
+        'permission_callback' => function() { return current_user_can('edit_posts'); }
+    ]);
+});
+
+if (!function_exists('agency_os_set_elementor_data')) {
+function agency_os_set_elementor_data($r) {
+    $post_id = (int) $r->get_param('post_id');
+    $data = $r->get_param('elementor_data');
+    if (!$post_id || get_post_status($post_id) === false) return new WP_Error('not_found', 'Post not found', ['status' => 404]);
+    if (!current_user_can('edit_post', $post_id)) return new WP_Error('forbidden', 'Cannot edit this post', ['status' => 403]);
+    if (!is_string($data)) return new WP_Error('invalid', 'elementor_data must be a string', ['status' => 400]);
+    json_decode($data, true);
+    if (json_last_error() !== JSON_ERROR_NONE) return new WP_Error('invalid_json', 'Invalid JSON: ' . json_last_error_msg(), ['status' => 400]);
+    update_post_meta($post_id, '_elementor_data', wp_slash($data));
+    update_post_meta($post_id, '_elementor_edit_mode', 'builder');
+    delete_post_meta($post_id, '_elementor_css');
+    $written = get_post_meta($post_id, '_elementor_data', true);
+    return ['success' => true, 'post_id' => $post_id, 'bytes' => strlen(is_string($written) ? $written : '')];
+}
+}`;
+
+      // Reuse an existing snippet with this name if present (so re-running
+      // updates in place instead of piling up duplicates).
+      let existing = null;
+      try {
+        const all = await wpReq('/code-snippets/v1/snippets');
+        existing = (Array.isArray(all) ? all : []).find(s => s.name === snippetName) || null;
+      } catch (error) {
+        if (error.message.includes('rest_no_route')) {
+          return {
+            success: false,
+            error: 'Code Snippets REST API not found. Install & activate the "Code Snippets" plugin first.',
+            steps: ['Install the Code Snippets plugin, then re-run wp_bootstrap_elementor_writer.']
+          };
+        }
+        steps.push('Could not list existing snippets: ' + error.message);
+      }
+
+      let snippet;
+      if (existing) {
+        steps.push(`Updating existing snippet (ID ${existing.id})...`);
+        snippet = await wpReq(`/code-snippets/v1/snippets/${existing.id}`, {
+          method: 'POST',
+          body: { name: snippetName, code: snippetCode, scope: 'global', active: true }
+        });
+      } else {
+        steps.push('Creating Elementor write-route snippet...');
+        snippet = await wpReq('/code-snippets/v1/snippets', {
+          method: 'POST',
+          body: {
+            name: snippetName,
+            desc: 'Registers the privileged agency-os/v1/elementor-data REST route used by WordPress MCP to write _elementor_data.',
+            code: snippetCode,
+            scope: 'global',
+            active: true
+          }
+        });
+      }
+      steps.push(`Snippet saved (ID ${snippet.id ?? existing?.id}), verifying route...`);
+
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const verified = await routeLive();
+      steps.push(verified ? 'Elementor write route verified!' : 'Route not responding yet — it may need a moment to register.');
+
+      return {
+        success: verified,
+        via: 'code-snippet',
+        snippet_id: snippet.id ?? existing?.id,
+        verified,
+        message: verified
+          ? 'Elementor write route installed via active Code Snippet (no mu-plugin).'
+          : 'Snippet saved but route not verified yet. Re-run wp_check_file_api shortly.',
+        steps
+      };
+    }
+
     case 'wp_check_file_api': {
       // A route "exists" if it responds with anything other than 404/rest_no_route
       // (e.g. a 400/403 on our empty probe payload means the route is registered).
@@ -4159,8 +4276,9 @@ async function executeTool(name, args, clientConfig = null) {
           await wpReq(path, { method: 'POST', body: JSON.stringify({}) });
           return true;
         } catch (error) {
-          if (error.message.includes('404') || error.message.includes('rest_no_route')) return false;
-          return true;
+          // Only `rest_no_route` means the route isn't registered. Other errors
+          // (incl. a 404 "post not found" from the elementor route) prove it is.
+          return !error.message.includes('rest_no_route');
         }
       };
 
@@ -4200,9 +4318,9 @@ async function executeTool(name, args, clientConfig = null) {
           await wpReq(path, { method: 'POST', body: JSON.stringify({}) });
           return true;
         } catch (error) {
-          // 403/400/500 → the route exists but rejected our empty payload.
-          // 404 / rest_no_route → the route is not registered.
-          return !(error.message.includes('404') || error.message.includes('rest_no_route'));
+          // A registered route rejects our empty probe with 400/403/404
+          // ("post not found") etc. Only `rest_no_route` means it isn't there.
+          return !error.message.includes('rest_no_route');
         }
       };
 
