@@ -37,7 +37,44 @@ add_action('rest_api_init', function() {
             return current_user_can('manage_options');
         }
     ]);
+
+    register_rest_route('agency-os/v1', '/elementor-data', [
+        'methods' => 'POST',
+        'callback' => 'agency_os_set_elementor_data',
+        'permission_callback' => function() {
+            return current_user_can('edit_posts');
+        }
+    ]);
 });
+
+function agency_os_set_elementor_data($request) {
+    $post_id = (int) $request->get_param('post_id');
+    $data = $request->get_param('elementor_data');
+
+    if (!$post_id || get_post_status($post_id) === false) {
+        return new WP_Error('not_found', 'Post not found', ['status' => 404]);
+    }
+    if (!current_user_can('edit_post', $post_id)) {
+        return new WP_Error('forbidden', 'Cannot edit this post', ['status' => 403]);
+    }
+    if (!is_string($data)) {
+        return new WP_Error('invalid', 'elementor_data must be a string', ['status' => 400]);
+    }
+    json_decode($data, true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        return new WP_Error('invalid_json', 'Invalid JSON: ' . json_last_error_msg(), ['status' => 400]);
+    }
+
+    update_post_meta($post_id, '_elementor_data', wp_slash($data));
+    update_post_meta($post_id, '_elementor_edit_mode', 'builder');
+    delete_post_meta($post_id, '_elementor_css');
+    if (class_exists('\\Elementor\\Plugin')) {
+        try { \Elementor\Plugin::$instance->files_manager->clear_cache(); } catch (\Throwable $e) {}
+    }
+
+    $written = get_post_meta($post_id, '_elementor_data', true);
+    return ['success' => true, 'post_id' => $post_id, 'bytes' => strlen(is_string($written) ? $written : '')];
+}
 
 function agency_os_create_file($request) {
     $path = sanitize_text_field($request->get_param('path'));

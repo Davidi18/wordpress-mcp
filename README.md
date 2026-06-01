@@ -1,4 +1,10 @@
-# WordPress MCP Server v2.6 - Elementor Control Plane
+# WordPress MCP Server v2.7 - Elementor Control Plane
+
+## 🎉 What's New in v2.7
+
+- 🖋️ **Reliable Elementor writes** — every tool that writes `_elementor_data` now routes through a privileged `agency-os/v1/elementor-data` mu-plugin endpoint that does a direct `update_post_meta` behind an `edit_post` capability check. This sidesteps core REST's refusal to write the protected `_elementor_data` postmeta (reads always worked; writes used to fail). If the route isn't installed, writes transparently fall back to the core meta write. Run `wp_bootstrap_file_api` (or `force: true`) to install/upgrade the mu-plugin; `wp_check_file_api` now reports whether the Elementor write route is present.
+- ✂️ **Page excerpt support** — `wp_update_page` and `wp_create_page` now accept `excerpt`. Passing `excerpt: ""` to `wp_update_page` cleanly clears an existing excerpt (previously there was no way to delete a page excerpt via MCP).
+- 🧩 **Code Snippets management** — new `wp_list_snippets` / `wp_get_snippet` / `wp_create_snippet` / `wp_update_snippet` / `wp_activate_snippet` / `wp_deactivate_snippet` / `wp_delete_snippet` wrap the Code Snippets plugin REST API, so agents can install a guard snippet (or any PHP/JS/CSS snippet) without shipping an mu-plugin.
 
 ## 🎉 What's New in v2.6
 
@@ -96,8 +102,8 @@
 ### Pages (5 endpoints)
 - `wp_get_pages` - List pages
 - `wp_get_page` - Get single page
-- `wp_create_page` - Create new page
-- `wp_update_page` - Update existing page
+- `wp_create_page` - Create new page (supports `excerpt`)
+- `wp_update_page` - Update existing page (supports `excerpt`; pass `excerpt: ""` to clear it)
 - `wp_delete_page` - Delete page
 
 ### Media (5 endpoints) ✨
@@ -146,6 +152,17 @@
 - **`wp_delete_plugin`** - Delete a plugin (must be deactivated)
 - **`wp_update_plugin`** - Update to latest version
 - **`wp_bootstrap_plugin_installer`** - Setup ZIP installer API
+
+### File API & Code Snippets ✨ v2.7
+- **`wp_create_file`** - Write a file to allowed dirs (mu-plugins, uploads) via the Agency OS File API
+- **`wp_bootstrap_file_api`** - Auto-install/upgrade the Agency OS mu-plugin (File API + privileged Elementor write route)
+- **`wp_check_file_api`** - Report whether the File API and Elementor write route are installed
+- **`wp_list_snippets`** - List Code Snippets (id, name, scope, active state, tags)
+- **`wp_get_snippet`** - Get a single snippet with its full code body
+- **`wp_create_snippet`** - Create a snippet (PHP code without the `<?php` tag)
+- **`wp_update_snippet`** - Update an existing snippet
+- **`wp_activate_snippet`** / **`wp_deactivate_snippet`** - Toggle a snippet on/off
+- **`wp_delete_snippet`** - Permanently delete a snippet
 
 ### WooCommerce Products (5 endpoints) ✨ NEW in v2.5!
 - **`wc_list_products`** - List products with filters (category, status, SKU, on_sale)

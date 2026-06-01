@@ -4,6 +4,17 @@
 
 הפורמט מבוסס על [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [3.1.0] - 2026-06-01
+
+### ✨ Added
+- **Privileged Elementor write route** — endpoint חדש `agency-os/v1/elementor-data` במ-mu-plugin שמעדכן את `_elementor_data` ישירות דרך `update_post_meta` מאחורי בדיקת הרשאת `edit_post`. כל הכלים שכותבים `_elementor_data` (`wp_elementor_create_page`, `wp_elementor_update_page`, `wp_elementor_update_from_file`, `wp_elementor_insert_block`, `wp_elementor_insert_widget`, `wp_elementor_update_widget`, `wp_elementor_duplicate_widget`, `wp_publish_draft_over`, `wp_replace_text`, `wp_restore_page_state`) עוברים דרכו, עם fallback אוטומטי לכתיבת meta הרגילה של core כשה-route לא מותקן. פותר את המצב שבו read עבד אבל write נפל בגלל הגבלות core REST על protected meta.
+- **תמיכת excerpt בעמודים** — `wp_update_page` ו-`wp_create_page` מקבלים כעת `excerpt`. העברת `excerpt: ""` ל-`wp_update_page` מנקה excerpt קיים מעמוד.
+- **ניהול Code Snippets** — כלים חדשים `wp_list_snippets`, `wp_get_snippet`, `wp_create_snippet`, `wp_update_snippet`, `wp_activate_snippet`, `wp_deactivate_snippet`, `wp_delete_snippet` שעוטפים את ה-REST API של תוסף Code Snippets. מאפשר להתקין snippet של guard בלי mu-plugin.
+
+### 🔧 Changed
+- `wp_bootstrap_file_api` בודק כעת גם את קיום ה-route של `elementor-data` ומשדרג את ה-mu-plugin כשהוא חסר (במקום לעצור על "already installed").
+- `wp_check_file_api` מחזיר `elementor_write_route` שמציין אם ה-route הפריבילגי מותקן.
+
 ## [3.0.1] - 2025-10-05
 
 ### 🔧 Fixed

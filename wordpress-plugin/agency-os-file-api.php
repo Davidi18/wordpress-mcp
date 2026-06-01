@@ -41,7 +41,82 @@ add_action('rest_api_init', function() {
             ]
         ]
     ]);
+
+    // Privileged Elementor data writer. Core REST refuses to write the protected
+    // `_elementor_data` postmeta key, so the MCP server routes Elementor writes
+    // here. Guarded per-post by the edit_post capability.
+    register_rest_route('agency-os/v1', '/elementor-data', [
+        'methods' => 'POST',
+        'callback' => 'agency_os_set_elementor_data',
+        'permission_callback' => function() {
+            return current_user_can('edit_posts');
+        },
+        'args' => [
+            'post_id' => [
+                'required' => true,
+                'type' => 'integer',
+                'description' => 'Target post/page ID'
+            ],
+            'elementor_data' => [
+                'required' => true,
+                'type' => 'string',
+                'description' => 'Elementor data as a JSON string'
+            ]
+        ]
+    ]);
 });
+
+/**
+ * Write `_elementor_data` for a post via a direct meta update, bypassing the
+ * core REST protected-meta restriction.
+ *
+ * @param WP_REST_Request $request
+ * @return WP_REST_Response|WP_Error
+ */
+function agency_os_set_elementor_data($request) {
+    $post_id = (int) $request->get_param('post_id');
+    $data = $request->get_param('elementor_data');
+
+    if (!$post_id || get_post_status($post_id) === false) {
+        return new WP_Error('not_found', 'Post not found', ['status' => 404]);
+    }
+
+    if (!current_user_can('edit_post', $post_id)) {
+        return new WP_Error('forbidden', 'You cannot edit this post', ['status' => 403]);
+    }
+
+    if (!is_string($data)) {
+        return new WP_Error('invalid', 'elementor_data must be a string', ['status' => 400]);
+    }
+
+    json_decode($data, true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        return new WP_Error('invalid_json', 'elementor_data is not valid JSON: ' . json_last_error_msg(), ['status' => 400]);
+    }
+
+    // Elementor stores the data slashed; wp_slash counters the wp_unslash that
+    // the metadata API applies, so the stored value matches the input exactly.
+    update_post_meta($post_id, '_elementor_data', wp_slash($data));
+    update_post_meta($post_id, '_elementor_edit_mode', 'builder');
+
+    // Drop the cached CSS so the front-end regenerates from the new data.
+    delete_post_meta($post_id, '_elementor_css');
+    if (class_exists('\\Elementor\\Plugin')) {
+        try {
+            \Elementor\Plugin::$instance->files_manager->clear_cache();
+        } catch (\Throwable $e) {
+            // Cache clearing is best-effort; the data write already succeeded.
+        }
+    }
+
+    $written = get_post_meta($post_id, '_elementor_data', true);
+
+    return rest_ensure_response([
+        'success' => true,
+        'post_id' => $post_id,
+        'bytes'   => strlen(is_string($written) ? $written : '')
+    ]);
+}
 
 /**
  * Create a file on the WordPress server
