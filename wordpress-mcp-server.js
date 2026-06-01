@@ -552,6 +552,61 @@ function statePayload(state) {
   return payload;
 }
 
+// Write `_elementor_data` through the privileged Agency OS route when it's
+// installed, falling back to the core REST meta write otherwise.
+//
+// Why this exists: `_elementor_data` is a `_`-prefixed (protected) postmeta key
+// that Elementor does NOT register for REST writes. Core REST therefore rejects
+// attempts to set it via /wp/v2/pages/{id} ("rest_cannot_update" /
+// "rest_protected_meta") even though reads succeed. The mu-plugin route does a
+// direct `update_post_meta` behind an `edit_post` capability check, so writes
+// land reliably. If the route isn't present we degrade to the old core write so
+// nothing breaks on sites that haven't installed the bridge.
+async function writeElementorData(wpReq, pageId, data) {
+  const serialized = typeof data === 'string' ? data : JSON.stringify(data);
+  try {
+    const res = await wpReq('/agency-os/v1/elementor-data', {
+      method: 'POST',
+      body: { post_id: pageId, elementor_data: serialized }
+    });
+    return { via: 'privileged', bytes: res?.bytes ?? serialized.length };
+  } catch (error) {
+    // Only fall back when the route itself is absent (rest_no_route). A plain
+    // 404 from the route means "post not found" — a real error we must surface,
+    // not a missing endpoint, so we don't mask it with a core write attempt.
+    const notInstalled = /rest_no_route/.test(error.message);
+    if (notInstalled) {
+      await wpReq(`/wp/v2/pages/${pageId}`, {
+        method: 'POST',
+        body: { meta: { _elementor_data: serialized } }
+      });
+      return { via: 'core', bytes: serialized.length };
+    }
+    throw error;
+  }
+}
+
+// POST a page update, routing any `_elementor_data` in the payload through the
+// privileged route while sending every other field (title, content, excerpt,
+// SEO meta, …) via core REST. `body` is the full /wp/v2/pages/{id} payload.
+async function updatePageRouted(wpReq, pageId, body) {
+  const payload = { ...body };
+  let elementor;
+  if (payload.meta && payload.meta._elementor_data !== undefined) {
+    elementor = payload.meta._elementor_data;
+    const { _elementor_data, ...restMeta } = payload.meta;
+    if (Object.keys(restMeta).length > 0) payload.meta = restMeta;
+    else delete payload.meta;
+  }
+  if (Object.keys(payload).length > 0) {
+    await wpReq(`/wp/v2/pages/${pageId}`, { method: 'POST', body: payload });
+  }
+  if (elementor !== undefined) {
+    return await writeElementorData(wpReq, pageId, elementor);
+  }
+  return null;
+}
+
 const tools = [
   // POSTS (5 endpoints)
   {
@@ -658,6 +713,7 @@ const tools = [
         title: { type: 'string', description: 'Page title', required: true },
         content: { type: 'string', description: 'Page content (HTML)', required: true },
         status: { type: 'string', description: 'Page status (publish, draft)', default: 'draft' },
+        excerpt: { type: 'string', description: 'Page excerpt' },
         parent: { type: 'number', description: 'Parent page ID' }
       },
       required: ['title', 'content']
@@ -672,7 +728,8 @@ const tools = [
         id: { type: 'number', description: 'Page ID', required: true },
         title: { type: 'string', description: 'Page title' },
         content: { type: 'string', description: 'Page content (HTML)' },
-        status: { type: 'string', description: 'Page status' }
+        status: { type: 'string', description: 'Page status' },
+        excerpt: { type: 'string', description: 'Page excerpt. Pass an empty string "" to clear the existing excerpt.' }
       },
       required: ['id']
     }
@@ -1100,6 +1157,109 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {}
+    }
+  },
+
+  // CODE SNIPPETS (7 endpoints) — wraps the Code Snippets plugin REST API
+  // (/code-snippets/v1/snippets). Lets you manage PHP/JS/CSS snippets directly,
+  // e.g. install a guard snippet without shipping an mu-plugin.
+  {
+    name: 'wp_list_snippets',
+    description: 'List Code Snippets registered on the site (requires the "Code Snippets" plugin). Returns id, name, scope, active state, and tags for each snippet. Use this to discover existing snippets before creating or editing one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        active_only: { type: 'boolean', description: 'Only return active snippets', default: false }
+      }
+    }
+  },
+  {
+    name: 'wp_get_snippet',
+    description: 'Get a single Code Snippet by ID, including its full code body, scope, priority and active state.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Snippet ID', required: true }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_create_snippet',
+    description: 'Create a new Code Snippet. IMPORTANT: provide `code` WITHOUT the opening <?php tag (Code Snippets adds it). Use `scope` to control where it runs: "global" (everywhere), "admin", "front-end", "single-use" (run once then deactivate), "content" (shortcode), or "head-content"/"footer-content" (raw markup). Set `active: true` to enable immediately.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Snippet name', required: true },
+        code: { type: 'string', description: 'Snippet body WITHOUT the opening <?php tag', required: true },
+        desc: { type: 'string', description: 'Snippet description' },
+        scope: { type: 'string', description: 'Execution scope: global, admin, front-end, single-use, content, head-content, footer-content', default: 'global' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags to attach to the snippet' },
+        priority: { type: 'number', description: 'Execution priority (lower runs earlier)', default: 10 },
+        active: { type: 'boolean', description: 'Activate the snippet immediately', default: false }
+      },
+      required: ['name', 'code']
+    }
+  },
+  {
+    name: 'wp_update_snippet',
+    description: 'Update an existing Code Snippet by ID. Only the fields you pass are changed. Provide `code` WITHOUT the opening <?php tag.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Snippet ID', required: true },
+        name: { type: 'string', description: 'Snippet name' },
+        code: { type: 'string', description: 'Snippet body WITHOUT the opening <?php tag' },
+        desc: { type: 'string', description: 'Snippet description' },
+        scope: { type: 'string', description: 'Execution scope: global, admin, front-end, single-use, content, head-content, footer-content' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags to attach to the snippet' },
+        priority: { type: 'number', description: 'Execution priority (lower runs earlier)' },
+        active: { type: 'boolean', description: 'Active state of the snippet' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_activate_snippet',
+    description: 'Activate a Code Snippet by ID so its code runs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Snippet ID', required: true }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_deactivate_snippet',
+    description: 'Deactivate a Code Snippet by ID so its code stops running (without deleting it).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Snippet ID', required: true }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_delete_snippet',
+    description: 'Permanently delete a Code Snippet by ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'Snippet ID', required: true }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'wp_bootstrap_elementor_writer',
+    description: 'Install the privileged Elementor write route (agency-os/v1/elementor-data) as an ACTIVE Code Snippet — no mu-plugin and no file write required. This is the recommended way to enable reliable _elementor_data writes (core REST refuses to write that protected meta). Idempotent: if the route is already live it does nothing; otherwise it creates/updates a global active snippet that registers the route. Requires the "Code Snippets" plugin.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        force: { type: 'boolean', description: 'Reinstall/refresh the snippet even if the route already responds', default: false }
+      }
     }
   },
 
@@ -2311,6 +2471,7 @@ async function executeTool(name, args, clientConfig = null) {
           title: args.title,
           content: args.content,
           status: args.status || 'draft',
+          ...(args.excerpt !== undefined ? { excerpt: args.excerpt } : {}),
           parent: args.parent
         })
       });
@@ -2334,6 +2495,9 @@ async function executeTool(name, args, clientConfig = null) {
       if (args.title !== undefined) updates.title = args.title;
       if (args.content !== undefined) updates.content = args.content;
       if (args.status !== undefined) updates.status = args.status;
+      // Pass excerpt through even when it's an empty string, so callers can
+      // clear an existing excerpt with excerpt: "".
+      if (args.excerpt !== undefined) updates.excerpt = args.excerpt;
       if (args.meta !== undefined) updates.meta = args.meta;
       // Yoast SEO shorthand
       if (args.yoast_title !== undefined || args.yoast_desc !== undefined || args.yoast_canonical !== undefined) {
@@ -2355,6 +2519,7 @@ async function executeTool(name, args, clientConfig = null) {
         status: page.status,
         date: page.date,
         modified: page.modified,
+        excerpt: page.excerpt?.raw ?? page.excerpt?.rendered ?? '',
         parent: page.parent,
         author: page.author,
         featured_media: page.featured_media,
@@ -2394,11 +2559,16 @@ async function executeTool(name, args, clientConfig = null) {
         body: {
           title: args.title,
           status: args.status || 'draft',
-          content: args.content || '',
-          meta: { _elementor_data: args.elementor_data }
+          content: args.content || ''
         }
       });
-      return { id: created.id, title: created.title?.rendered || args.title };
+      // Write _elementor_data through the privileged route (core REST rejects
+      // protected meta writes), with a fallback to the core write inside.
+      let elementorWrite = null;
+      if (args.elementor_data) {
+        elementorWrite = await writeElementorData(wpReq, created.id, args.elementor_data);
+      }
+      return { id: created.id, title: created.title?.rendered || args.title, elementor_write: elementorWrite };
     }
 
     case 'wp_elementor_update_page': {
@@ -2417,11 +2587,8 @@ async function executeTool(name, args, clientConfig = null) {
       if (Object.keys(updatePayload).length === 0) {
         throw new Error('No update data provided (title, status, content, or elementor_data).');
       }
-      await wpReq(`/wp/v2/pages/${args.id}`, {
-        method: 'POST',
-        body: updatePayload
-      });
-      return { updated: true, id: args.id };
+      const elementorWrite = await updatePageRouted(wpReq, args.id, updatePayload);
+      return { updated: true, id: args.id, elementor_write: elementorWrite };
     }
 
     case 'wp_elementor_delete_page': {
@@ -2459,11 +2626,8 @@ async function executeTool(name, args, clientConfig = null) {
       if (args.content_file_path) {
         fileUpdatePayload.content = fs.readFileSync(args.content_file_path, 'utf8');
       }
-      await wpReq(`/wp/v2/pages/${args.id}`, {
-        method: 'POST',
-        body: fileUpdatePayload
-      });
-      return { updated: true, id: args.id };
+      const elementorWrite = await updatePageRouted(wpReq, args.id, fileUpdatePayload);
+      return { updated: true, id: args.id, elementor_write: elementorWrite };
     }
 
     case 'wp_elementor_list_templates': {
@@ -2665,10 +2829,7 @@ async function executeTool(name, args, clientConfig = null) {
       const merged = spliceBlock(currentSections, block.content, position);
       const serialized = JSON.stringify(merged);
 
-      await wpReq(`/wp/v2/pages/${args.page_id}`, {
-        method: 'POST',
-        body: { meta: { _elementor_data: serialized } }
-      });
+      await writeElementorData(wpReq, args.page_id, serialized);
 
       return {
         inserted: true,
@@ -2736,10 +2897,7 @@ async function executeTool(name, args, clientConfig = null) {
       if (!newTree) throw new Error('Patch failed unexpectedly');
 
       const serialized = JSON.stringify(newTree);
-      await wpReq(`/wp/v2/pages/${args.page_id}`, {
-        method: 'POST',
-        body: { meta: { _elementor_data: serialized } }
-      });
+      await writeElementorData(wpReq, args.page_id, serialized);
 
       const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
       const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
@@ -2770,10 +2928,7 @@ async function executeTool(name, args, clientConfig = null) {
       if (!duplicateId) throw new Error(`Element ${args.element_id} not found on page ${args.page_id}`);
 
       const serialized = JSON.stringify(newTree);
-      await wpReq(`/wp/v2/pages/${args.page_id}`, {
-        method: 'POST',
-        body: { meta: { _elementor_data: serialized } }
-      });
+      await writeElementorData(wpReq, args.page_id, serialized);
 
       const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
       const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
@@ -2803,10 +2958,7 @@ async function executeTool(name, args, clientConfig = null) {
       const { tree: newTree, insertedId } = insertElement(tree, widget, args.position);
       const serialized = JSON.stringify(newTree);
 
-      await wpReq(`/wp/v2/pages/${args.page_id}`, {
-        method: 'POST',
-        body: { meta: { _elementor_data: serialized } }
-      });
+      await writeElementorData(wpReq, args.page_id, serialized);
 
       const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
       const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
@@ -2881,7 +3033,7 @@ async function executeTool(name, args, clientConfig = null) {
         }
       }
 
-      await wpReq(`/wp/v2/pages/${targetId}`, { method: 'POST', body: payload });
+      await updatePageRouted(wpReq, targetId, payload);
 
       const verify = await wpReq(`/wp/v2/pages/${targetId}?context=edit&_fields=id,meta`);
       const verifyBytes = typeof verify?.meta?._elementor_data === 'string'
@@ -2976,7 +3128,7 @@ async function executeTool(name, args, clientConfig = null) {
       const writePayload = {};
       if (contentHits > 0) writePayload.content = newContent;
       if (elementorChanged) writePayload.meta = { _elementor_data: newElementorString };
-      await wpReq(`/wp/v2/pages/${postId}`, { method: 'POST', body: writePayload });
+      await updatePageRouted(wpReq, postId, writePayload);
 
       const after = await wpReq(`/wp/v2/pages/${postId}?context=edit&_fields=id,meta`);
       const afterBytes = typeof after?.meta?._elementor_data === 'string'
@@ -3015,7 +3167,7 @@ async function executeTool(name, args, clientConfig = null) {
       if (!state || typeof state !== 'object') throw new Error('state object required');
 
       const payload = statePayload(state);
-      await wpReq(`/wp/v2/pages/${postId}`, { method: 'POST', body: payload });
+      await updatePageRouted(wpReq, postId, payload);
 
       const after = await wpReq(`/wp/v2/pages/${postId}?context=edit&_fields=id,meta`);
       const afterBytes = typeof after?.meta?._elementor_data === 'string'
@@ -3928,49 +4080,259 @@ async function executeTool(name, args, clientConfig = null) {
       return result;
     }
 
-    case 'wp_check_file_api': {
-      try {
-        // Try to call the endpoint with empty data to see if it exists
-        await wpReq('/agency-os/v1/create-file', {
-          method: 'POST',
-          body: JSON.stringify({ path: '', content: '' })
-        });
-        return { available: true, message: 'File API is installed and working' };
-      } catch (error) {
-        if (error.message.includes('403') || error.message.includes('forbidden')) {
-          return { available: true, message: 'File API is installed (permission error on empty request is expected)' };
+    // ── CODE SNIPPETS (wraps the Code Snippets plugin REST API) ──
+    case 'wp_list_snippets': {
+      const snippets = await wpReq('/code-snippets/v1/snippets');
+      const list = (Array.isArray(snippets) ? snippets : [])
+        .filter(s => (args.active_only ? !!s.active : true))
+        .map(s => ({
+          id: s.id,
+          name: s.name,
+          scope: s.scope,
+          active: !!s.active,
+          priority: s.priority,
+          tags: s.tags || [],
+          modified: s.modified
+        }));
+      return { count: list.length, snippets: list };
+    }
+
+    case 'wp_get_snippet': {
+      if (!args.id) throw new Error('id required');
+      const snippet = await wpReq(`/code-snippets/v1/snippets/${args.id}`);
+      return snippet;
+    }
+
+    case 'wp_create_snippet': {
+      if (!args.name) throw new Error('name required');
+      if (args.code === undefined) throw new Error('code required');
+      const body = {
+        name: args.name,
+        code: args.code,
+        desc: args.desc ?? '',
+        scope: args.scope || 'global',
+        priority: args.priority ?? 10,
+        active: args.active === true
+      };
+      if (Array.isArray(args.tags)) body.tags = args.tags;
+      const snippet = await wpReq('/code-snippets/v1/snippets', {
+        method: 'POST',
+        body
+      });
+      return { created: true, id: snippet.id, name: snippet.name, active: !!snippet.active, scope: snippet.scope };
+    }
+
+    case 'wp_update_snippet': {
+      if (!args.id) throw new Error('id required');
+      const body = {};
+      if (args.name !== undefined) body.name = args.name;
+      if (args.code !== undefined) body.code = args.code;
+      if (args.desc !== undefined) body.desc = args.desc;
+      if (args.scope !== undefined) body.scope = args.scope;
+      if (args.priority !== undefined) body.priority = args.priority;
+      if (args.active !== undefined) body.active = args.active;
+      if (Array.isArray(args.tags)) body.tags = args.tags;
+      if (Object.keys(body).length === 0) {
+        throw new Error('No update data provided (name, code, desc, scope, priority, active, or tags).');
+      }
+      const snippet = await wpReq(`/code-snippets/v1/snippets/${args.id}`, {
+        method: 'POST',
+        body
+      });
+      return { updated: true, id: snippet.id ?? args.id, name: snippet.name, active: !!snippet.active, scope: snippet.scope };
+    }
+
+    case 'wp_activate_snippet': {
+      if (!args.id) throw new Error('id required');
+      const snippet = await wpReq(`/code-snippets/v1/snippets/${args.id}/activate`, {
+        method: 'POST'
+      });
+      return { activated: true, id: args.id, active: snippet?.active !== undefined ? !!snippet.active : true };
+    }
+
+    case 'wp_deactivate_snippet': {
+      if (!args.id) throw new Error('id required');
+      const snippet = await wpReq(`/code-snippets/v1/snippets/${args.id}/deactivate`, {
+        method: 'POST'
+      });
+      return { deactivated: true, id: args.id, active: snippet?.active !== undefined ? !!snippet.active : false };
+    }
+
+    case 'wp_delete_snippet': {
+      if (!args.id) throw new Error('id required');
+      await wpReq(`/code-snippets/v1/snippets/${args.id}`, { method: 'DELETE' });
+      return { deleted: true, id: args.id };
+    }
+
+    case 'wp_bootstrap_elementor_writer': {
+      const force = args.force || false;
+      const steps = [];
+
+      // Treat anything other than rest_no_route as "route is live".
+      const routeLive = async () => {
+        try {
+          await wpReq('/agency-os/v1/elementor-data', { method: 'POST', body: JSON.stringify({}) });
+          return true;
+        } catch (error) {
+          return !error.message.includes('rest_no_route');
         }
-        if (error.message.includes('404') || error.message.includes('rest_no_route')) {
+      };
+
+      if (!force && await routeLive()) {
+        return { success: true, message: 'Elementor write route already installed', steps: ['Route is responding'] };
+      }
+
+      // The route is registered directly inside an active global snippet — no
+      // mu-plugin, no file write. The function_exists guard avoids a fatal
+      // redeclare if the File API mu-plugin also defines it on the same site.
+      const snippetName = 'Agency OS Elementor Writer';
+      const snippetCode = `if (!defined('ABSPATH')) exit;
+
+add_action('rest_api_init', function() {
+    register_rest_route('agency-os/v1', '/elementor-data', [
+        'methods' => 'POST',
+        'callback' => 'agency_os_set_elementor_data',
+        'permission_callback' => function() { return current_user_can('edit_posts'); }
+    ]);
+});
+
+if (!function_exists('agency_os_set_elementor_data')) {
+function agency_os_set_elementor_data($r) {
+    $post_id = (int) $r->get_param('post_id');
+    $data = $r->get_param('elementor_data');
+    if (!$post_id || get_post_status($post_id) === false) return new WP_Error('not_found', 'Post not found', ['status' => 404]);
+    if (!current_user_can('edit_post', $post_id)) return new WP_Error('forbidden', 'Cannot edit this post', ['status' => 403]);
+    if (!is_string($data)) return new WP_Error('invalid', 'elementor_data must be a string', ['status' => 400]);
+    json_decode($data, true);
+    if (json_last_error() !== JSON_ERROR_NONE) return new WP_Error('invalid_json', 'Invalid JSON: ' . json_last_error_msg(), ['status' => 400]);
+    update_post_meta($post_id, '_elementor_data', wp_slash($data));
+    update_post_meta($post_id, '_elementor_edit_mode', 'builder');
+    delete_post_meta($post_id, '_elementor_css');
+    $written = get_post_meta($post_id, '_elementor_data', true);
+    return ['success' => true, 'post_id' => $post_id, 'bytes' => strlen(is_string($written) ? $written : '')];
+}
+}`;
+
+      // Reuse an existing snippet with this name if present (so re-running
+      // updates in place instead of piling up duplicates).
+      let existing = null;
+      try {
+        const all = await wpReq('/code-snippets/v1/snippets');
+        existing = (Array.isArray(all) ? all : []).find(s => s.name === snippetName) || null;
+      } catch (error) {
+        if (error.message.includes('rest_no_route')) {
           return {
-            available: false,
-            message: 'File API not installed',
-            instructions: [
-              '1. Install "Code Snippets" plugin on the WordPress site',
-              '2. Run wp_bootstrap_file_api tool to auto-install the File API',
-              'OR manually upload agency-os-file-api.php to wp-content/mu-plugins/'
-            ]
+            success: false,
+            error: 'Code Snippets REST API not found. Install & activate the "Code Snippets" plugin first.',
+            steps: ['Install the Code Snippets plugin, then re-run wp_bootstrap_elementor_writer.']
           };
         }
-        return { available: false, error: error.message };
+        steps.push('Could not list existing snippets: ' + error.message);
       }
+
+      let snippet;
+      if (existing) {
+        steps.push(`Updating existing snippet (ID ${existing.id})...`);
+        snippet = await wpReq(`/code-snippets/v1/snippets/${existing.id}`, {
+          method: 'POST',
+          body: { name: snippetName, code: snippetCode, scope: 'global', active: true }
+        });
+      } else {
+        steps.push('Creating Elementor write-route snippet...');
+        snippet = await wpReq('/code-snippets/v1/snippets', {
+          method: 'POST',
+          body: {
+            name: snippetName,
+            desc: 'Registers the privileged agency-os/v1/elementor-data REST route used by WordPress MCP to write _elementor_data.',
+            code: snippetCode,
+            scope: 'global',
+            active: true
+          }
+        });
+      }
+      steps.push(`Snippet saved (ID ${snippet.id ?? existing?.id}), verifying route...`);
+
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const verified = await routeLive();
+      steps.push(verified ? 'Elementor write route verified!' : 'Route not responding yet — it may need a moment to register.');
+
+      return {
+        success: verified,
+        via: 'code-snippet',
+        snippet_id: snippet.id ?? existing?.id,
+        verified,
+        message: verified
+          ? 'Elementor write route installed via active Code Snippet (no mu-plugin).'
+          : 'Snippet saved but route not verified yet. Re-run wp_check_file_api shortly.',
+        steps
+      };
+    }
+
+    case 'wp_check_file_api': {
+      // A route "exists" if it responds with anything other than 404/rest_no_route
+      // (e.g. a 400/403 on our empty probe payload means the route is registered).
+      const probe = async (path) => {
+        try {
+          await wpReq(path, { method: 'POST', body: JSON.stringify({}) });
+          return true;
+        } catch (error) {
+          // Only `rest_no_route` means the route isn't registered. Other errors
+          // (incl. a 404 "post not found" from the elementor route) prove it is.
+          return !error.message.includes('rest_no_route');
+        }
+      };
+
+      const fileApi = await probe('/agency-os/v1/create-file');
+      if (!fileApi) {
+        return {
+          available: false,
+          message: 'File API not installed',
+          elementor_write_route: false,
+          instructions: [
+            '1. Install "Code Snippets" plugin on the WordPress site',
+            '2. Run wp_bootstrap_file_api tool to auto-install the File API',
+            'OR manually upload agency-os-file-api.php to wp-content/mu-plugins/'
+          ]
+        };
+      }
+
+      const elementorRoute = await probe('/agency-os/v1/elementor-data');
+      return {
+        available: true,
+        message: elementorRoute
+          ? 'File API + Elementor write route are installed and working'
+          : 'File API installed, but the Elementor write route is missing — run wp_bootstrap_file_api (or with force:true) to upgrade the mu-plugin',
+        elementor_write_route: elementorRoute
+      };
     }
 
     case 'wp_bootstrap_file_api': {
       const steps = [];
       const force = args.force || false;
 
-      // Step 1: Check if File API already exists
-      if (!force) {
+      // Step 1: Check if File API already exists AND exposes the elementor-data
+      // route. Probe both so older installs (create-file only) get upgraded with
+      // the privileged Elementor writer instead of short-circuiting here.
+      const routeInstalled = async (path) => {
         try {
-          await wpReq('/agency-os/v1/create-file', {
-            method: 'POST',
-            body: JSON.stringify({ path: '', content: '' })
-          });
-          return { success: true, message: 'File API already installed!', steps: ['File API is working'] };
+          await wpReq(path, { method: 'POST', body: JSON.stringify({}) });
+          return true;
         } catch (error) {
-          if (error.message.includes('403') || error.message.includes('forbidden')) {
-            return { success: true, message: 'File API already installed!', steps: ['File API is working'] };
-          }
+          // A registered route rejects our empty probe with 400/403/404
+          // ("post not found") etc. Only `rest_no_route` means it isn't there.
+          return !error.message.includes('rest_no_route');
+        }
+      };
+
+      if (!force) {
+        const hasFileApi = await routeInstalled('/agency-os/v1/create-file');
+        const hasElementorRoute = hasFileApi && await routeInstalled('/agency-os/v1/elementor-data');
+        if (hasFileApi && hasElementorRoute) {
+          return { success: true, message: 'File API already installed!', steps: ['File API + Elementor write route are working'] };
+        }
+        if (hasFileApi) {
+          steps.push('File API found but Elementor write route missing — reinstalling mu-plugin to add it...');
+        } else {
           steps.push('File API not found, proceeding with installation...');
         }
       } else {
@@ -4053,7 +4415,27 @@ add_action("rest_api_init", function() {
         "callback" => "agency_os_create_file",
         "permission_callback" => function() { return current_user_can("manage_options"); }
     ]);
+    register_rest_route("agency-os/v1", "/elementor-data", [
+        "methods" => "POST",
+        "callback" => "agency_os_set_elementor_data",
+        "permission_callback" => function() { return current_user_can("edit_posts"); }
+    ]);
 });
+
+function agency_os_set_elementor_data($r) {
+    $post_id = (int) $r->get_param("post_id");
+    $data = $r->get_param("elementor_data");
+    if (!$post_id || get_post_status($post_id) === false) return new WP_Error("not_found", "Post not found", ["status" => 404]);
+    if (!current_user_can("edit_post", $post_id)) return new WP_Error("forbidden", "Cannot edit this post", ["status" => 403]);
+    if (!is_string($data)) return new WP_Error("invalid", "elementor_data must be a string", ["status" => 400]);
+    json_decode($data, true);
+    if (json_last_error() !== JSON_ERROR_NONE) return new WP_Error("invalid_json", "Invalid JSON: " . json_last_error_msg(), ["status" => 400]);
+    update_post_meta($post_id, "_elementor_data", wp_slash($data));
+    update_post_meta($post_id, "_elementor_edit_mode", "builder");
+    delete_post_meta($post_id, "_elementor_css");
+    $written = get_post_meta($post_id, "_elementor_data", true);
+    return ["success" => true, "post_id" => $post_id, "bytes" => strlen(is_string($written) ? $written : "")];
+}
 
 function agency_os_create_file($r) {
     $path = sanitize_text_field($r->get_param("path"));
