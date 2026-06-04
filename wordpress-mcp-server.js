@@ -3474,16 +3474,24 @@ async function executeTool(name, args, clientConfig = null) {
       } catch (e) { /* not available */ }
 
       // Method 3: Redirection plugin
+      // NOTE: the Redirection plugin's REST API uses 0-based page indexing.
+      // Callers pass a 1-based `page` (default 1), so translate it here —
+      // otherwise the default lands on the *second* page and returns an empty
+      // list while still reporting a non-zero `total`.
       try {
-        const redirection = await wpReq('/redirection/v1/redirect?' + new URLSearchParams({
+        const reqPage = Math.max(0, (args.page ? Number(args.page) - 1 : 0));
+        const rdParams = new URLSearchParams({
           per_page: String(args.per_page || 50),
-          page: String(args.page || 1)
-        }));
-        if (redirection && redirection.items) {
+          page: String(reqPage)
+        });
+        if (args.search) rdParams.set('filterBy[url]', args.search);
+        const redirection = await wpReq('/redirection/v1/redirect?' + rdParams.toString());
+        if (redirection && Array.isArray(redirection.items)) {
           return {
             source: 'redirection-plugin',
-            total: redirection.total || 0,
-            redirects: (redirection.items || []).map(r => ({
+            total: redirection.total || redirection.items.length,
+            page: reqPage,
+            redirects: redirection.items.map(r => ({
               id: r.id,
               source: r.url,
               target: r.action_data?.url || '',
@@ -3501,6 +3509,10 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_create_redirect': {
+      // Collect per-plugin failures so the final error is actionable instead
+      // of a blanket "no plugin found" when a plugin is in fact active.
+      const attempts = [];
+
       // Try RankMath first
       try {
         const result = await wpReq('/rankmath/v1/updateRedirection', {
@@ -3518,7 +3530,8 @@ async function executeTool(name, args, clientConfig = null) {
         if (result && !result.code) {
           return { created: true, source: 'rankmath', redirect: result };
         }
-      } catch (e) { /* RankMath not available */ }
+        attempts.push({ plugin: 'rankmath', response: result });
+      } catch (e) { attempts.push({ plugin: 'rankmath', error: e.message }); }
 
       // Try Redirection plugin
       try {
@@ -3533,12 +3546,29 @@ async function executeTool(name, args, clientConfig = null) {
             match_type: 'url'
           }
         });
-        if (result && result.id) {
-          return { created: true, source: 'redirection-plugin', id: result.id };
+        // The Redirection plugin's create endpoint does NOT return the new row
+        // as `{ id }`. On success it returns the refreshed paged LIST
+        // ({ items, total, pages }) with the new redirect included. Other
+        // versions may return the created object directly, so handle both.
+        if (result) {
+          if (result.id) {
+            return { created: true, source: 'redirection-plugin', id: result.id };
+          }
+          if (Array.isArray(result.items)) {
+            const match = result.items.find(r => r.url === args.source);
+            return {
+              created: true,
+              source: 'redirection-plugin',
+              id: match?.id ?? null,
+              total: result.total,
+              redirect: match || null
+            };
+          }
         }
-      } catch (e) { /* Redirection plugin not available */ }
+        attempts.push({ plugin: 'redirection-plugin', response: result });
+      } catch (e) { attempts.push({ plugin: 'redirection-plugin', error: e.message }); }
 
-      return { error: 'No redirect plugin found (tried RankMath and Redirection plugin)' };
+      return { error: 'No redirect plugin found (tried RankMath and Redirection plugin)', attempts };
     }
 
     // MEDIA
