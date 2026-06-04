@@ -4,6 +4,12 @@
 
 הפורמט מבוסס על [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### 🔧 Fixed
+- **`wp_create_redirect` עם תוסף Redirection** — הכלי החזיר בטעות `No redirect plugin found` למרות שתוסף Redirection פעיל והרדיירקט אכן נוצר. הסיבה: endpoint היצירה של Redirection (`POST /redirection/v1/redirect`) מחזיר את **רשימת** הרדיירקטים המעודכנת (`{ items, total, pages }`) ולא אובייקט בודד עם `id`. הקוד בדק `result.id` ולכן נפל ל-fallback. כעת מזוהה גם תגובת רשימה (מאתר את הרשומה החדשה לפי `url`), וההודעה הסופית כוללת `attempts` עם פירוט הכשל לכל תוסף.
+- **`wp_get_redirects` החזיר `total` חיובי אך `redirects: []`** — REST API של תוסף Redirection משתמש בעימוד מבוסס-0, אך הכלי שלח `page` ברירת מחדל 1, כלומר העמוד ה**שני** שהיה ריק. כעת `page` (1-based מהקורא) מתורגם ל-0-based, ונתמך גם חיפוש דרך `filterBy[url]`.
+
 ## [3.1.0] - 2026-06-01
 
 ### ✨ Added
