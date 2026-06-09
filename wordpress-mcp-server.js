@@ -630,7 +630,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post ID', required: true }
+        id: { type: 'number', description: 'Post ID' }
       },
       required: ['id']
     }
@@ -641,8 +641,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Post title', required: true },
-        content: { type: 'string', description: 'Post content (HTML)', required: true },
+        title: { type: 'string', description: 'Post title' },
+        content: { type: 'string', description: 'Post content (HTML)' },
         status: { type: 'string', description: 'Post status (publish, draft, pending)', default: 'draft' },
         excerpt: { type: 'string', description: 'Post excerpt' },
         categories: { type: 'array', items: { type: 'number' }, description: 'Category IDs' },
@@ -657,7 +657,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post ID', required: true },
+        id: { type: 'number', description: 'Post ID' },
         title: { type: 'string', description: 'Post title' },
         content: { type: 'string', description: 'Post content (HTML)' },
         status: { type: 'string', description: 'Post status' },
@@ -672,7 +672,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post ID', required: true },
+        id: { type: 'number', description: 'Post ID' },
         force: { type: 'boolean', description: 'Bypass trash and force deletion', default: false }
       },
       required: ['id']
@@ -699,7 +699,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Page ID', required: true }
+        id: { type: 'number', description: 'Page ID' }
       },
       required: ['id']
     }
@@ -710,8 +710,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Page title', required: true },
-        content: { type: 'string', description: 'Page content (HTML)', required: true },
+        title: { type: 'string', description: 'Page title' },
+        content: { type: 'string', description: 'Page content (HTML)' },
         status: { type: 'string', description: 'Page status (publish, draft)', default: 'draft' },
         excerpt: { type: 'string', description: 'Page excerpt' },
         parent: { type: 'number', description: 'Parent page ID' }
@@ -725,7 +725,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Page ID', required: true },
+        id: { type: 'number', description: 'Page ID' },
         title: { type: 'string', description: 'Page title' },
         content: { type: 'string', description: 'Page content (HTML)' },
         status: { type: 'string', description: 'Page status' },
@@ -740,7 +740,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Page ID', required: true },
+        id: { type: 'number', description: 'Page ID' },
         force: { type: 'boolean', description: 'Bypass trash and force deletion', default: false }
       },
       required: ['id']
@@ -766,7 +766,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Media ID', required: true }
+        id: { type: 'number', description: 'Media ID' }
       },
       required: ['id']
     }
@@ -777,8 +777,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        filename: { type: 'string', description: 'File name', required: true },
-        base64_content: { type: 'string', description: 'Base64 encoded file content', required: true },
+        filename: { type: 'string', description: 'File name' },
+        base64_content: { type: 'string', description: 'Base64 encoded file content' },
         title: { type: 'string', description: 'Media title' },
         alt_text: { type: 'string', description: 'Alt text for images' }
       },
@@ -791,7 +791,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Media ID', required: true },
+        id: { type: 'number', description: 'Media ID' },
         title: { type: 'string', description: 'Media title' },
         alt_text: { type: 'string', description: 'Alternative text for images' },
         caption: { type: 'string', description: 'Media caption' },
@@ -807,7 +807,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Media ID', required: true },
+        id: { type: 'number', description: 'Media ID' },
         force: { type: 'boolean', description: 'Bypass trash and force deletion', default: false }
       },
       required: ['id']
@@ -835,7 +835,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Comment ID', required: true }
+        id: { type: 'number', description: 'Comment ID' }
       },
       required: ['id']
     }
@@ -846,8 +846,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        post: { type: 'number', description: 'Post ID', required: true },
-        content: { type: 'string', description: 'Comment content', required: true },
+        post: { type: 'number', description: 'Post ID' },
+        content: { type: 'string', description: 'Comment content' },
         author_name: { type: 'string', description: 'Comment author name' },
         author_email: { type: 'string', description: 'Comment author email' },
         parent: { type: 'number', description: 'Parent comment ID for replies' }
@@ -861,7 +861,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Comment ID', required: true },
+        id: { type: 'number', description: 'Comment ID' },
         content: { type: 'string', description: 'Comment content' },
         status: { type: 'string', description: 'Comment status (approve, hold, spam, trash)' }
       },
@@ -874,7 +874,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Comment ID', required: true },
+        id: { type: 'number', description: 'Comment ID' },
         force: { type: 'boolean', description: 'Bypass trash and force deletion', default: false }
       },
       required: ['id']
@@ -901,7 +901,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'User ID', required: true }
+        id: { type: 'number', description: 'User ID' }
       },
       required: ['id']
     }
@@ -922,7 +922,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        post_type: { type: 'string', description: 'Custom post type slug', required: true },
+        post_type: { type: 'string', description: 'Custom post type slug' },
         per_page: { type: 'number', description: 'Number of posts', default: 10 },
         page: { type: 'number', description: 'Page number', default: 1 },
         status: { type: 'string', description: 'Post status', default: 'publish' }
@@ -936,8 +936,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        post_type: { type: 'string', description: 'Custom post type slug', required: true },
-        id: { type: 'number', description: 'Post ID', required: true }
+        post_type: { type: 'string', description: 'Custom post type slug' },
+        id: { type: 'number', description: 'Post ID' }
       },
       required: ['post_type', 'id']
     }
@@ -1009,7 +1009,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Category name', required: true },
+        name: { type: 'string', description: 'Category name' },
         description: { type: 'string', description: 'Category description' },
         parent: { type: 'number', description: 'Parent category ID' },
         slug: { type: 'string', description: 'Category slug' }
@@ -1023,7 +1023,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Tag name', required: true },
+        name: { type: 'string', description: 'Tag name' },
         description: { type: 'string', description: 'Tag description' },
         slug: { type: 'string', description: 'Tag slug' }
       },
@@ -1036,7 +1036,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Category ID', required: true },
+        id: { type: 'number', description: 'Category ID' },
         name: { type: 'string', description: 'Category name' },
         description: { type: 'string', description: 'Category description' },
         parent: { type: 'number', description: 'Parent category ID' }
@@ -1050,7 +1050,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Category ID', required: true },
+        id: { type: 'number', description: 'Category ID' },
         force: { type: 'boolean', description: 'Force deletion', default: false }
       },
       required: ['id']
@@ -1062,7 +1062,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Tag ID', required: true },
+        id: { type: 'number', description: 'Tag ID' },
         name: { type: 'string', description: 'Tag name' },
         description: { type: 'string', description: 'Tag description' },
         slug: { type: 'string', description: 'Tag slug' }
@@ -1076,7 +1076,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Tag ID', required: true },
+        id: { type: 'number', description: 'Tag ID' },
         force: { type: 'boolean', description: 'Required by WP REST for tag deletion', default: true }
       },
       required: ['id']
@@ -1134,8 +1134,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Relative path from WP root (e.g., "wp-content/mu-plugins/file.php")', required: true },
-        content: { type: 'string', description: 'File content', required: true },
+        path: { type: 'string', description: 'Relative path from WP root (e.g., "wp-content/mu-plugins/file.php")' },
+        content: { type: 'string', description: 'File content' },
         overwrite: { type: 'boolean', description: 'Overwrite if file exists', default: true }
       },
       required: ['path', 'content']
@@ -1179,7 +1179,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Snippet ID', required: true }
+        id: { type: 'number', description: 'Snippet ID' }
       },
       required: ['id']
     }
@@ -1190,8 +1190,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Snippet name', required: true },
-        code: { type: 'string', description: 'Snippet body WITHOUT the opening <?php tag', required: true },
+        name: { type: 'string', description: 'Snippet name' },
+        code: { type: 'string', description: 'Snippet body WITHOUT the opening <?php tag' },
         desc: { type: 'string', description: 'Snippet description' },
         scope: { type: 'string', description: 'Execution scope: global, admin, front-end, single-use, content, head-content, footer-content', default: 'global' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Tags to attach to the snippet' },
@@ -1207,7 +1207,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Snippet ID', required: true },
+        id: { type: 'number', description: 'Snippet ID' },
         name: { type: 'string', description: 'Snippet name' },
         code: { type: 'string', description: 'Snippet body WITHOUT the opening <?php tag' },
         desc: { type: 'string', description: 'Snippet description' },
@@ -1225,7 +1225,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Snippet ID', required: true }
+        id: { type: 'number', description: 'Snippet ID' }
       },
       required: ['id']
     }
@@ -1236,7 +1236,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Snippet ID', required: true }
+        id: { type: 'number', description: 'Snippet ID' }
       },
       required: ['id']
     }
@@ -1247,7 +1247,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Snippet ID', required: true }
+        id: { type: 'number', description: 'Snippet ID' }
       },
       required: ['id']
     }
@@ -1281,7 +1281,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        slug: { type: 'string', description: 'Plugin slug from WordPress.org (e.g., "akismet", "contact-form-7")', required: true },
+        slug: { type: 'string', description: 'Plugin slug from WordPress.org (e.g., "akismet", "contact-form-7")' },
         activate: { type: 'boolean', description: 'Activate plugin after installation', default: false }
       },
       required: ['slug']
@@ -1293,7 +1293,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'URL to the plugin ZIP file', required: true },
+        url: { type: 'string', description: 'URL to the plugin ZIP file' },
         activate: { type: 'boolean', description: 'Activate plugin after installation', default: false }
       },
       required: ['url']
@@ -1315,7 +1315,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")' }
       },
       required: ['plugin']
     }
@@ -1326,7 +1326,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")' }
       },
       required: ['plugin']
     }
@@ -1337,7 +1337,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")' }
       },
       required: ['plugin']
     }
@@ -1348,7 +1348,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")', required: true }
+        plugin: { type: 'string', description: 'Plugin identifier (e.g., "akismet/akismet.php" or just "akismet")' }
       },
       required: ['plugin']
     }
@@ -1379,7 +1379,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Product ID', required: true }
+        id: { type: 'number', description: 'Product ID' }
       },
       required: ['id']
     }
@@ -1390,7 +1390,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Product name', required: true },
+        name: { type: 'string', description: 'Product name' },
         type: { type: 'string', description: 'Product type: simple, grouped, external, variable', default: 'simple' },
         status: { type: 'string', description: 'Status: draft, pending, publish, private', default: 'publish' },
         regular_price: { type: 'string', description: 'Regular price' },
@@ -1417,7 +1417,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Product ID', required: true },
+        id: { type: 'number', description: 'Product ID' },
         name: { type: 'string', description: 'Product name' },
         status: { type: 'string', description: 'Status: draft, pending, publish, private' },
         regular_price: { type: 'string', description: 'Regular price' },
@@ -1442,7 +1442,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Product ID', required: true },
+        id: { type: 'number', description: 'Product ID' },
         force: { type: 'boolean', description: 'True to permanently delete, false to move to trash', default: false }
       },
       required: ['id']
@@ -1469,7 +1469,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Category name', required: true },
+        name: { type: 'string', description: 'Category name' },
         slug: { type: 'string', description: 'Category slug' },
         parent: { type: 'number', description: 'Parent category ID' },
         description: { type: 'string', description: 'Category description' },
@@ -1484,7 +1484,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Category ID', required: true },
+        id: { type: 'number', description: 'Category ID' },
         name: { type: 'string', description: 'Category name' },
         slug: { type: 'string', description: 'Category slug' },
         parent: { type: 'number', description: 'Parent category ID' },
@@ -1500,7 +1500,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Category ID', required: true },
+        id: { type: 'number', description: 'Category ID' },
         force: { type: 'boolean', description: 'Force delete (required for categories)', default: true }
       },
       required: ['id']
@@ -1514,7 +1514,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: { type: 'number', description: 'Parent product ID', required: true },
+        product_id: { type: 'number', description: 'Parent product ID' },
         per_page: { type: 'number', description: 'Variations per page', default: 100 }
       },
       required: ['product_id']
@@ -1526,13 +1526,13 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: { type: 'number', description: 'Parent product ID', required: true },
+        product_id: { type: 'number', description: 'Parent product ID' },
         regular_price: { type: 'string', description: 'Regular price' },
         sale_price: { type: 'string', description: 'Sale price' },
         sku: { type: 'string', description: 'SKU' },
         stock_quantity: { type: 'number', description: 'Stock quantity' },
         stock_status: { type: 'string', description: 'Stock status: instock, outofstock, onbackorder' },
-        attributes: { type: 'array', description: 'Variation attributes [{name: "Color", option: "Red"}]', required: true },
+        attributes: { type: 'array', description: 'Variation attributes [{name: "Color", option: "Red"}]' },
         image: { type: 'object', description: 'Variation image {src: "url"} or {id: 123}' }
       },
       required: ['product_id', 'attributes']
@@ -1544,8 +1544,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: { type: 'number', description: 'Parent product ID', required: true },
-        variation_id: { type: 'number', description: 'Variation ID', required: true },
+        product_id: { type: 'number', description: 'Parent product ID' },
+        variation_id: { type: 'number', description: 'Variation ID' },
         regular_price: { type: 'string', description: 'Regular price' },
         sale_price: { type: 'string', description: 'Sale price' },
         sku: { type: 'string', description: 'SKU' },
@@ -1562,8 +1562,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        product_id: { type: 'number', description: 'Parent product ID', required: true },
-        variation_id: { type: 'number', description: 'Variation ID', required: true },
+        product_id: { type: 'number', description: 'Parent product ID' },
+        variation_id: { type: 'number', description: 'Variation ID' },
         force: { type: 'boolean', description: 'Force permanent delete', default: true }
       },
       required: ['product_id', 'variation_id']
@@ -1593,7 +1593,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Order ID', required: true }
+        id: { type: 'number', description: 'Order ID' }
       },
       required: ['id']
     }
@@ -1604,7 +1604,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Order ID', required: true },
+        id: { type: 'number', description: 'Order ID' },
         status: { type: 'string', description: 'Order status' },
         customer_note: { type: 'string', description: 'Note for customer' },
         meta_data: { type: 'array', description: 'Meta data array [{key, value}]' }
@@ -1620,7 +1620,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Page ID', required: true }
+        id: { type: 'number', description: 'Page ID' }
       },
       required: ['id']
     }
@@ -1631,7 +1631,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        slug: { type: 'string', description: 'The page slug to find', required: true }
+        slug: { type: 'string', description: 'The page slug to find' }
       },
       required: ['slug']
     }
@@ -1642,10 +1642,10 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Page title', required: true },
+        title: { type: 'string', description: 'Page title' },
         status: { type: 'string', description: 'Page status (publish, draft, pending, private)', default: 'draft' },
         content: { type: 'string', description: 'Standard WordPress content (optional)' },
-        elementor_data: { type: 'string', description: 'Elementor page data as JSON string', required: true }
+        elementor_data: { type: 'string', description: 'Elementor page data as JSON string' }
       },
       required: ['title', 'elementor_data']
     }
@@ -1656,7 +1656,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Page ID', required: true },
+        id: { type: 'number', description: 'Page ID' },
         title: { type: 'string', description: 'Page title' },
         status: { type: 'string', description: 'Page status' },
         content: { type: 'string', description: 'Standard WordPress content' },
@@ -1671,7 +1671,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Page ID', required: true },
+        id: { type: 'number', description: 'Page ID' },
         force: { type: 'boolean', description: 'Bypass trash and force deletion', default: false }
       },
       required: ['id']
@@ -1683,8 +1683,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Page ID', required: true },
-        file_path: { type: 'string', description: 'Absolute path to save the file', required: true },
+        id: { type: 'number', description: 'Page ID' },
+        file_path: { type: 'string', description: 'Absolute path to save the file' },
         only_elementor_data: { type: 'boolean', description: 'Save only _elementor_data (not full page object)', default: false }
       },
       required: ['id', 'file_path']
@@ -1696,8 +1696,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Page ID', required: true },
-        elementor_file_path: { type: 'string', description: 'Absolute path to the Elementor data JSON file', required: true },
+        id: { type: 'number', description: 'Page ID' },
+        elementor_file_path: { type: 'string', description: 'Absolute path to the Elementor data JSON file' },
         title: { type: 'string', description: 'Page title (optional)' },
         status: { type: 'string', description: 'Page status (optional)' },
         content_file_path: { type: 'string', description: 'Absolute path to content file (optional)' }
@@ -1723,7 +1723,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Template ID', required: true }
+        id: { type: 'number', description: 'Template ID' }
       },
       required: ['id']
     }
@@ -1734,7 +1734,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Page ID', required: true },
+        id: { type: 'number', description: 'Page ID' },
         per_page: { type: 'number', description: 'Number of revisions to return', default: 10 }
       },
       required: ['id']
@@ -1756,7 +1756,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        block_id: { type: 'string', description: 'Block id from wp_elementor_list_blocks (e.g. "obfx/contact-us")', required: true }
+        block_id: { type: 'string', description: 'Block id from wp_elementor_list_blocks (e.g. "obfx/contact-us")' }
       },
       required: ['block_id']
     }
@@ -1772,7 +1772,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        page_id: { type: 'number', description: 'Page id to use as homepage. Pass 0 to revert to latest-posts mode.', required: true },
+        page_id: { type: 'number', description: 'Page id to use as homepage. Pass 0 to revert to latest-posts mode.' },
         posts_page_id: { type: 'number', description: 'Optional. Page id for the blog/posts listing.' }
       },
       required: ['page_id']
@@ -1795,8 +1795,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        page_id: { type: 'number', description: 'Target page id', required: true },
-        block_id: { type: 'string', description: 'Block id from wp_elementor_list_blocks', required: true },
+        page_id: { type: 'number', description: 'Target page id' },
+        block_id: { type: 'string', description: 'Block id from wp_elementor_list_blocks' },
         position: { type: 'string', description: 'Insert position: "end" (default), "start", or a zero-based index as string', default: 'end' }
       },
       required: ['page_id', 'block_id']
@@ -1812,7 +1812,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        page_id: { type: 'number', description: 'Page id', required: true },
+        page_id: { type: 'number', description: 'Page id' },
         max_snippet_length: { type: 'number', description: 'Max chars per widget snippet (default 80)', default: 80 }
       },
       required: ['page_id']
@@ -1824,8 +1824,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        page_id: { type: 'number', description: 'Page id', required: true },
-        element_id: { type: 'string', description: 'Element id (8-char hex from get_page_structure)', required: true }
+        page_id: { type: 'number', description: 'Page id' },
+        element_id: { type: 'string', description: 'Element id (8-char hex from get_page_structure)' }
       },
       required: ['page_id', 'element_id']
     }
@@ -1836,9 +1836,9 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        page_id: { type: 'number', description: 'Page id', required: true },
-        element_id: { type: 'string', description: 'Element id', required: true },
-        settings_patch: { type: 'object', description: 'Settings to merge (or replace) into the element. Top-level keys overwrite existing same-named keys in the element\'s settings object.', required: true },
+        page_id: { type: 'number', description: 'Page id' },
+        element_id: { type: 'string', description: 'Element id' },
+        settings_patch: { type: 'object', description: 'Settings to merge (or replace) into the element. Top-level keys overwrite existing same-named keys in the element\'s settings object.' },
         replace_settings: { type: 'boolean', description: 'If true, replace the settings object entirely instead of shallow-merging.', default: false }
       },
       required: ['page_id', 'element_id', 'settings_patch']
@@ -1850,8 +1850,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        page_id: { type: 'number', description: 'Page id', required: true },
-        element_id: { type: 'string', description: 'Element id to duplicate', required: true },
+        page_id: { type: 'number', description: 'Page id' },
+        element_id: { type: 'string', description: 'Element id to duplicate' },
         position: { type: 'string', enum: ['after', 'before', 'start', 'end'], description: '"after" / "before" (relative to original, same parent), or "start" / "end" (of the parent container).', default: 'after' }
       },
       required: ['page_id', 'element_id']
@@ -1863,15 +1863,13 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        page_id: { type: 'number', description: 'Page id', required: true },
+        page_id: { type: 'number', description: 'Page id' },
         widget: {
           type: 'object',
-          description: 'Widget config: { widgetType: "shortcode" | "heading" | "button" | ... , settings: {...} }. elType defaults to "widget". Optional `elements: []` for nested children. id is auto-generated.',
-          required: true
+          description: 'Widget config: { widgetType: "shortcode" | "heading" | "button" | ... , settings: {...} }. elType defaults to "widget". Optional `elements: []` for nested children. id is auto-generated.'
         },
         position: {
-          description: 'Insertion target. Strings "start" / "end" or an integer = root-level position. Object forms: { after_id: "abc12345" } / { before_id: "abc12345" } = sibling of that element; { parent_id: "col1", position: "end"|"start"|N } = inside that parent.',
-          required: true
+          description: 'Insertion target. Strings "start" / "end" or an integer = root-level position. Object forms: { after_id: "abc12345" } / { before_id: "abc12345" } = sibling of that element; { parent_id: "col1", position: "end"|"start"|N } = inside that parent.'
         }
       },
       required: ['page_id', 'widget', 'position']
@@ -1950,7 +1948,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        menu_id: { type: 'number', description: 'Menu ID (from wp_get_menus)', required: true }
+        menu_id: { type: 'number', description: 'Menu ID (from wp_get_menus)' }
       },
       required: ['menu_id']
     }
@@ -1963,7 +1961,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        search: { type: 'string', description: 'Search query', required: true },
+        search: { type: 'string', description: 'Search query' },
         type: { type: 'string', description: 'Filter by type: post, page, category, post_tag' },
         per_page: { type: 'number', description: 'Results per page', default: 20 }
       },
@@ -1978,7 +1976,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        ids: { type: 'array', items: { type: 'number' }, description: 'Array of post/page IDs to update', required: true },
+        ids: { type: 'array', items: { type: 'number' }, description: 'Array of post/page IDs to update' },
         updates: {
           type: 'object',
           description: 'Fields to update on all items: status, categories, tags, author, meta, etc.',
@@ -2015,7 +2013,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post/page ID', required: true },
+        id: { type: 'number', description: 'Post/page ID' },
         post_type: { type: 'string', description: 'post or page', default: 'post' },
         title: { type: 'string', description: 'SEO title' },
         description: { type: 'string', description: 'Meta description' },
@@ -2031,7 +2029,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post/page ID', required: true },
+        id: { type: 'number', description: 'Post/page ID' },
         post_type: { type: 'string', description: 'post or page', default: 'post' }
       },
       required: ['id']
@@ -2045,7 +2043,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'Full URL to get SEO head for', required: true }
+        url: { type: 'string', description: 'Full URL to get SEO head for' }
       },
       required: ['url']
     }
@@ -2056,7 +2054,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post/page ID', required: true },
+        id: { type: 'number', description: 'Post/page ID' },
         post_type: { type: 'string', description: 'post or page', default: 'post' },
         title: { type: 'string', description: 'SEO title' },
         description: { type: 'string', description: 'Meta description' },
@@ -2076,7 +2074,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post/page ID', required: true },
+        id: { type: 'number', description: 'Post/page ID' },
         post_type: { type: 'string', description: 'post or page', default: 'post' }
       },
       required: ['id']
@@ -2109,8 +2107,8 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Source URL path (e.g. /old-page)', required: true },
-        target: { type: 'string', description: 'Target URL (e.g. /new-page or full URL)', required: true },
+        source: { type: 'string', description: 'Source URL path (e.g. /old-page)' },
+        target: { type: 'string', description: 'Target URL (e.g. /new-page or full URL)' },
         type: { type: 'number', description: 'Redirect type: 301 (permanent) or 302 (temporary)', default: 301 }
       },
       required: ['source', 'target']
