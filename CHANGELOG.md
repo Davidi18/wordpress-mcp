@@ -6,6 +6,15 @@
 
 ## [Unreleased]
 
+### ✨ Added
+- **תמיכת Elementor 4.0 "atomic" (V4)** — מודול פורמט חדש `elementor-atomic.js` שבונה את אלמנטי ה-V4 (מערכת ה-`$$type`, local style classes, ומבנה ה-atomic) שתואם למה ש-Elementor 4.0 שומר ב-`_elementor_data`. הידע פורט מ-[`msrbuilds/elementor-mcp`](https://github.com/msrbuilds/elementor-mcp). כולל חבילת בדיקות `node:test` (הרצה: `npm test`).
+- **`wp_elementor_add_atomic`** — כלי חדש שבונה אלמנט atomic מפרמטרים שטוחים (בלי לכתוב ביד את ה-JSON העטוף ב-`$$type`): קונטיינרים `e-flexbox`/`e-div-block` (עם layout כ-local style class) ו-widgets `e-heading`/`e-paragraph`/`e-button`/`e-image`/`e-svg`/`e-youtube`/`e-self-hosted-video`/`e-divider`. כולל בדיקת-תמיכה לפני כתיבה כדי לא לכתוב data ש-Elementor ישמיט בשקט.
+- **זיהוי תמיכת atomic** — route חדש `agency-os/v1/elementor-atomic-status` (נוסף ל-snippet של `wp_bootstrap_elementor_writer`) שמדווח אם סוגי ה-atomic רשומים/הניסוי פעיל. `wp_elementor_capabilities` מחזיר כעת שדה `atomic`. הזיהוי אינו מבוסס מספר-גרסה (ELEMENTOR_VERSION נשאר 3.x גם כשהניסוי דולק).
+- **`wp_elementor_get_widget_settings`** מחזיר כעת `settings_readable` (ערכים שטוחים וקריאים) ו-`is_atomic` עבור אלמנטי V4.
+
+### 🔧 Changed
+- ה-route `agency-os/v1/elementor-data` מטביע כעת `_elementor_version` ומנקה את מטמון ה-CSS (`files_manager->clear_cache`) אחרי כתיבה, כדי ש-CSS של atomic local-classes ייווצר מחדש. הכתיבה נשארת raw-meta (לא `Document::save`) כדי שאלמנטי V4 יישמרו byte-for-byte ולא יעברו סניטציה.
+
 ### 🔧 Fixed
 - **`wp_create_redirect` עם תוסף Redirection** — הכלי החזיר בטעות `No redirect plugin found` למרות שתוסף Redirection פעיל והרדיירקט אכן נוצר. הסיבה: endpoint היצירה של Redirection (`POST /redirection/v1/redirect`) מחזיר את **רשימת** הרדיירקטים המעודכנת (`{ items, total, pages }`) ולא אובייקט בודד עם `id`. הקוד בדק `result.id` ולכן נפל ל-fallback. כעת מזוהה גם תגובת רשימה (מאתר את הרשומה החדשה לפי `url`), וההודעה הסופית כוללת `attempts` עם פירוט הכשל לכל תוסף.
 - **`wp_get_redirects` החזיר `total` חיובי אך `redirects: []`** — REST API של תוסף Redirection משתמש בעימוד מבוסס-0, אך הכלי שלח `page` ברירת מחדל 1, כלומר העמוד ה**שני** שהיה ריק. כעת `page` (1-based מהקורא) מתורגם ל-0-based, ונתמך גם חיפוש דרך `filterBy[url]`.
