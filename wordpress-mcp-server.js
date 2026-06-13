@@ -18,6 +18,15 @@ import {
   normalizeWidget,
   summarizeTree
 } from './elementor-tree.js';
+import {
+  factory as atomicFactory,
+  widgets as atomicWidgets,
+  props as atomicProps,
+  unwrap as atomicUnwrap,
+  isAtomicType,
+  ATOMIC_WIDGET_TYPES,
+  ATOMIC_CONTAINER_TYPES
+} from './elementor-atomic.js';
 import { ELEMENTOR_META_KEYS, SEO_META_KEYS, POST_NON_TAX_FIELDS } from './wp-meta-keys.js';
 import {
   requireApiKey,
@@ -1254,7 +1263,7 @@ const tools = [
   },
   {
     name: 'wp_bootstrap_elementor_writer',
-    description: 'Install the privileged Elementor write route (agency-os/v1/elementor-data) as an ACTIVE Code Snippet — no mu-plugin and no file write required. This is the recommended way to enable reliable _elementor_data writes (core REST refuses to write that protected meta). Idempotent: if the route is already live it does nothing; otherwise it creates/updates a global active snippet that registers the route. Requires the "Code Snippets" plugin.',
+    description: 'Install the privileged Elementor routes (agency-os/v1/elementor-data for writes + agency-os/v1/elementor-atomic-status for Elementor 4.0 atomic-support detection) as an ACTIVE Code Snippet — no mu-plugin and no file write required. This is the recommended way to enable reliable _elementor_data writes (core REST refuses to write that protected meta) and to let wp_elementor_capabilities report whether atomic/V4 elements will persist. Idempotent: re-running updates the snippet in place. Requires the "Code Snippets" plugin.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1763,7 +1772,7 @@ const tools = [
   },
   {
     name: 'wp_elementor_capabilities',
-    description: 'Discover what Elementor features are available on the site BEFORE building. Returns: elementor_version, elementor_pro (active + version), active_kit_id, container_experiment_likely (heuristic based on version), and detected popular Elementor addon plugins (UAE, Essential Addons, JetEngine, etc.). Use this to decide whether to use Pro-only widgets (form, price-table, slides, posts/loop-grid, popup) or fall back to Free alternatives.',
+    description: 'Discover what Elementor features are available on the site BEFORE building. Returns: elementor_version, elementor_pro (active + version), active_kit_id, container_experiment_likely (heuristic based on version), atomic (whether Elementor 4.0 atomic/V4 elements like e-flexbox/e-heading are supported and will persist — authoritative when the probe route from wp_bootstrap_elementor_writer is installed), and detected popular Elementor addon plugins (UAE, Essential Addons, JetEngine, etc.). Use this to decide whether to use Pro-only widgets, atomic V4 elements (wp_elementor_add_atomic), or fall back to classic/Free alternatives.',
     inputSchema: { type: 'object', properties: {} }
   },
   {
@@ -1873,6 +1882,55 @@ const tools = [
         }
       },
       required: ['page_id', 'widget', 'position']
+    }
+  },
+  {
+    name: 'wp_elementor_add_atomic',
+    description: 'Add an Elementor 4.0 "atomic" (V4) element to a page using flat, AI-friendly params — no need to hand-write the $$type-wrapped JSON the atomic engine requires. Builds e-flexbox/e-div-block containers (with layout styles applied as a local style class) and atomic widgets (e-heading, e-paragraph, e-button, e-image, e-svg, e-youtube, e-self-hosted-video, e-divider). IMPORTANT: atomic elements only persist on sites where the atomic experiment is active — call wp_elementor_capabilities first (the `atomic` field) or rely on this tool\'s built-in pre-check (run wp_bootstrap_elementor_writer once so the check is authoritative). To nest widgets inside a container, add the container first, then add children with position:{ parent_id: <returned element_id> }.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id' },
+        element_type: {
+          type: 'string',
+          enum: [...ATOMIC_CONTAINER_TYPES, ...ATOMIC_WIDGET_TYPES],
+          description: 'Atomic element type: e-flexbox | e-div-block (containers) or e-heading | e-paragraph | e-button | e-image | e-svg | e-youtube | e-self-hosted-video | e-divider (widgets).'
+        },
+        position: {
+          description: 'Insertion target (default "end"). Strings "start"/"end" or integer = root level. Objects: { after_id } / { before_id } = sibling; { parent_id, position? } = inside a container.'
+        },
+        // Widget content
+        title: { type: 'string', description: 'e-heading: heading text.' },
+        content: { type: 'string', description: 'e-paragraph: paragraph text.' },
+        text: { type: 'string', description: 'e-button: button label.' },
+        tag: { type: 'string', description: 'HTML tag. Heading: h1–h6 (default h2). Containers: div/header/section/article/aside/footer (default div).' },
+        link: { type: 'string', description: 'Optional URL for heading/paragraph/button/image.' },
+        target_blank: { type: 'boolean', description: 'e-button: open link in a new tab.' },
+        image_id: { type: 'number', description: 'e-image: WordPress media attachment id.' },
+        image_url: { type: 'string', description: 'e-image: image URL (if not using a media id).' },
+        alt: { type: 'string', description: 'e-image: alt text.' },
+        svg_id: { type: 'number', description: 'e-svg: media attachment id.' },
+        svg_url: { type: 'string', description: 'e-svg: SVG URL.' },
+        video_url: { type: 'string', description: 'e-youtube: YouTube URL. e-self-hosted-video: video URL.' },
+        css_id: { type: 'string', description: 'Optional CSS id attribute for the element.' },
+        // Container layout/style params (applied as a local style class)
+        direction: { type: 'string', description: 'e-flexbox: flex-direction (row|column|row-reverse|column-reverse).' },
+        justify: { type: 'string', description: 'e-flexbox: justify-content (flex-start|center|flex-end|space-between|space-around|space-evenly).' },
+        align: { type: 'string', description: 'e-flexbox: align-items (flex-start|center|flex-end|stretch|baseline).' },
+        wrap: { type: 'string', description: 'e-flexbox: flex-wrap (nowrap|wrap|wrap-reverse).' },
+        gap: { type: 'number', description: 'e-flexbox: gap between children.' },
+        gap_unit: { type: 'string', description: 'Unit for gap (default px).' },
+        padding: { type: 'number', description: 'Containers: padding on all sides.' },
+        padding_unit: { type: 'string', description: 'Unit for padding (default px).' },
+        background_color: { type: 'string', description: 'Containers: background color (hex/rgba).' },
+        color: { type: 'string', description: 'Containers: text color.' },
+        min_height: { type: 'number', description: 'Containers: min-height.' },
+        width: { type: 'number', description: 'Containers: width.' },
+        border_radius: { type: 'number', description: 'Containers: border-radius.' },
+        version: { type: 'string', description: 'Optional Elementor version string to stamp on the element. Auto-filled from the site when the atomic probe route is installed.' },
+        skip_atomic_check: { type: 'boolean', description: 'Skip the pre-write atomic-support check and build anyway. Default false.', default: false }
+      },
+      required: ['page_id', 'element_type']
     }
   },
 
@@ -2760,6 +2818,27 @@ async function executeTool(name, args, clientConfig = null) {
         return false;
       })();
 
+      // Atomic (V4) support can't be inferred from the version number — Elementor
+      // ships it as opt-in experiments while ELEMENTOR_VERSION stays 3.x. The
+      // authoritative answer comes from the PHP probe route installed by
+      // wp_bootstrap_elementor_writer. Best-effort: if the route isn't installed
+      // we report supported:null so the agent knows detection is unavailable.
+      let atomic = {
+        supported: null,
+        detail: 'Probe route not installed — run wp_bootstrap_elementor_writer to enable atomic detection.'
+      };
+      try {
+        const status = await wpReq('/agency-os/v1/elementor-atomic-status');
+        if (status && typeof status === 'object') {
+          atomic = {
+            supported: !!status.atomic_supported,
+            registered_types: status.registered_types || [],
+            active_experiments: status.active_experiments || [],
+            elementor_version: status.elementor_version ?? elementorVersion
+          };
+        }
+      } catch { /* route missing or locked down — keep the null/unknown default */ }
+
       return {
         elementor: {
           installed: elementorVersion !== null || ('elementor' in detected),
@@ -2772,6 +2851,7 @@ async function executeTool(name, args, clientConfig = null) {
           version: proVersion
         },
         container_experiment_likely: containerLikely,
+        atomic,
         active_kit_id: activeKitId,
         addon_packs: detected,
         plugins_endpoint_accessible: plugins.length > 0
@@ -2861,12 +2941,18 @@ async function executeTool(name, args, clientConfig = null) {
       const tree = parseElementorData(page.meta?._elementor_data);
       const hit = findElementById(tree, args.element_id);
       if (!hit) throw new Error(`Element ${args.element_id} not found on page ${args.page_id}`);
+      // Atomic (V4) elements store every value in a $$type envelope, which is
+      // noisy to read. When we detect one, also return a flattened, readable
+      // view of its settings (heading title, link target, sizes as "24px", …).
+      const isAtomic = isAtomicType(hit.element.elType) || isAtomicType(hit.element.widgetType);
       return {
         page_id: page.id,
         element_id: hit.element.id,
         elType: hit.element.elType,
         widgetType: hit.element.widgetType || null,
+        is_atomic: isAtomic,
         settings: hit.element.settings || {},
+        ...(isAtomic ? { settings_readable: atomicUnwrap(hit.element.settings || {}) } : {}),
         child_count: Array.isArray(hit.element.elements) ? hit.element.elements.length : 0,
         ancestors_ids: hit.ancestors.map(a => a.id)
       };
@@ -2968,6 +3054,92 @@ async function executeTool(name, args, clientConfig = null) {
         widgetType: widget.widgetType || null,
         verified: verifyBytes === serialized.length,
         bytes_written: serialized.length,
+        previous_state: previousState
+      };
+    }
+
+    case 'wp_elementor_add_atomic': {
+      if (!args.page_id) throw new Error('page_id required');
+      const elementType = args.element_type;
+      if (!isAtomicType(elementType)) {
+        throw new Error(`element_type must be an atomic type (${[...ATOMIC_CONTAINER_TYPES, ...ATOMIC_WIDGET_TYPES].join(', ')})`);
+      }
+
+      // Pre-write atomic-support check. The probe route is the authoritative
+      // signal; if it's installed and says atomic won't persist, refuse rather
+      // than silently writing data Elementor will drop. If the route is absent
+      // we proceed but surface a warning, and we use its version to stamp the
+      // element when available.
+      let version = typeof args.version === 'string' ? args.version : '';
+      let atomicWarning = null;
+      try {
+        const status = await wpReq('/agency-os/v1/elementor-atomic-status');
+        if (status && typeof status === 'object') {
+          if (!version && status.elementor_version) version = String(status.elementor_version);
+          if (status.atomic_supported === false && !args.skip_atomic_check) {
+            return {
+              inserted: false,
+              error: 'atomic_not_supported',
+              message: 'Elementor 4.0 atomic elements are not active on this site, so the write would be silently dropped. Enable the "Atomic Elements" / V4 experiment in Elementor → Settings → Features, or pass skip_atomic_check:true to build anyway.',
+              atomic: status
+            };
+          }
+        }
+      } catch {
+        atomicWarning = 'Atomic-support probe route not installed (run wp_bootstrap_elementor_writer). Built without a pre-check — verify the element persisted, and confirm the atomic experiment is active if it did not.';
+      }
+
+      // Build the element from flat params via the atomic format module.
+      let element;
+      if (ATOMIC_CONTAINER_TYPES.includes(elementType)) {
+        const settings = {};
+        if (args.tag) settings.tag = atomicProps.string(args.tag);
+        const styleProps = {};
+        for (const k of ['direction', 'justify', 'align', 'wrap', 'gap', 'gap_unit',
+          'row_gap', 'column_gap', 'padding', 'padding_unit', 'padding_top', 'padding_right',
+          'padding_bottom', 'padding_left', 'margin_top', 'margin_bottom', 'background_color',
+          'color', 'min_height', 'width', 'border_radius']) {
+          if (args[k] !== undefined) styleProps[k] = args[k];
+        }
+        if (args.css_id) settings._cssid = atomicProps.string(args.css_id);
+        element = elementType === 'e-flexbox'
+          ? atomicFactory.createFlexbox(settings, [], styleProps, version)
+          : atomicFactory.createDivBlock(settings, [], styleProps, version);
+      } else {
+        const builderMap = {
+          'e-heading': () => atomicWidgets.heading({ title: args.title, tag: args.tag, link: args.link, css_id: args.css_id, version }),
+          'e-paragraph': () => atomicWidgets.paragraph({ content: args.content, link: args.link, css_id: args.css_id, version }),
+          'e-button': () => atomicWidgets.button({ text: args.text, link: args.link, target_blank: args.target_blank, css_id: args.css_id, version }),
+          'e-image': () => atomicWidgets.image({ image_id: args.image_id, image_url: args.image_url, alt: args.alt, link: args.link, css_id: args.css_id, version }),
+          'e-svg': () => atomicWidgets.svg({ svg_id: args.svg_id, svg_url: args.svg_url, css_id: args.css_id, version }),
+          'e-youtube': () => atomicWidgets.youtube({ video_url: args.video_url, css_id: args.css_id, version }),
+          'e-self-hosted-video': () => atomicWidgets.video({ video_url: args.video_url, video_id: args.video_id, css_id: args.css_id, version }),
+          'e-divider': () => atomicWidgets.divider({ css_id: args.css_id, version })
+        };
+        element = builderMap[elementType]();
+      }
+
+      const position = args.position ?? 'end';
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const previousState = extractPageState(page);
+      const tree = parseElementorData(page.meta?._elementor_data);
+
+      const { tree: newTree, insertedId } = insertElement(tree, element, position);
+      const serialized = JSON.stringify(newTree);
+      await writeElementorData(wpReq, args.page_id, serialized);
+
+      const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
+      const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
+
+      return {
+        inserted: true,
+        page_id: args.page_id,
+        element_id: insertedId,
+        element_type: elementType,
+        is_container: ATOMIC_CONTAINER_TYPES.includes(elementType),
+        verified: verifyBytes === serialized.length,
+        bytes_written: serialized.length,
+        ...(atomicWarning ? { warning: atomicWarning } : {}),
         previous_state: previousState
       };
     }
@@ -4222,6 +4394,11 @@ add_action('rest_api_init', function() {
         'callback' => 'agency_os_set_elementor_data',
         'permission_callback' => function() { return current_user_can('edit_posts'); }
     ]);
+    register_rest_route('agency-os/v1', '/elementor-atomic-status', [
+        'methods' => 'GET',
+        'callback' => 'agency_os_elementor_atomic_status',
+        'permission_callback' => function() { return current_user_can('edit_posts'); }
+    ]);
 });
 
 if (!function_exists('agency_os_set_elementor_data')) {
@@ -4233,11 +4410,62 @@ function agency_os_set_elementor_data($r) {
     if (!is_string($data)) return new WP_Error('invalid', 'elementor_data must be a string', ['status' => 400]);
     json_decode($data, true);
     if (json_last_error() !== JSON_ERROR_NONE) return new WP_Error('invalid_json', 'Invalid JSON: ' . json_last_error_msg(), ['status' => 400]);
+    // Raw meta write (NOT Document::save) so atomic/V4 elements persist byte-for-byte
+    // instead of being silently sanitized away when the page editor isn't opted in.
+    // This also keeps the byte-length verification used by the Node tools exact.
     update_post_meta($post_id, '_elementor_data', wp_slash($data));
     update_post_meta($post_id, '_elementor_edit_mode', 'builder');
+    // Stamp the Elementor version that authored this data (atomic CSS generation
+    // keys off it). Harmless for classic pages — mirrors Elementor's own save.
+    if (defined('ELEMENTOR_VERSION')) update_post_meta($post_id, '_elementor_version', ELEMENTOR_VERSION);
+    // Drop the cached CSS so Elementor regenerates it (incl. atomic local-class
+    // styles) on next front-end view.
     delete_post_meta($post_id, '_elementor_css');
+    if (class_exists('\\Elementor\\Plugin')) {
+        $e = \Elementor\Plugin::instance();
+        if (isset($e->files_manager) && method_exists($e->files_manager, 'clear_cache')) {
+            $e->files_manager->clear_cache();
+        }
+    }
     $written = get_post_meta($post_id, '_elementor_data', true);
     return ['success' => true, 'post_id' => $post_id, 'bytes' => strlen(is_string($written) ? $written : '')];
+}
+}
+
+if (!function_exists('agency_os_elementor_atomic_status')) {
+function agency_os_elementor_atomic_status() {
+    // Atomic (V4) support is NOT a version check: Elementor ships atomic as
+    // opt-in experiments while ELEMENTOR_VERSION still reports 3.x. The
+    // authoritative signal is whether the atomic element TYPES are registered
+    // server-side, because Document::save() keeps only registered types.
+    $registered_types = [];
+    $active_experiments = [];
+    if (class_exists('\\Elementor\\Plugin')) {
+        $e = \Elementor\Plugin::instance();
+        if (isset($e->elements_manager) && method_exists($e->elements_manager, 'get_element_types')) {
+            $t = $e->elements_manager->get_element_types();
+            if (is_array($t)) {
+                foreach (['e-flexbox', 'e-div-block'] as $slug) {
+                    if (isset($t[$slug])) $registered_types[] = $slug;
+                }
+            }
+        }
+        if (isset($e->experiments) && method_exists($e->experiments, 'is_feature_active')) {
+            foreach (['e_atomic_elements', 'atomic_widgets'] as $f) {
+                if ($e->experiments->is_feature_active($f)) $active_experiments[] = $f;
+            }
+        }
+    }
+    $version = defined('ELEMENTOR_VERSION') ? ELEMENTOR_VERSION : null;
+    $supported = !empty($registered_types)
+        || !empty($active_experiments)
+        || ($version && version_compare($version, '4.0.0', '>='));
+    return [
+        'atomic_supported'   => (bool) $supported,
+        'registered_types'   => $registered_types,
+        'active_experiments' => $active_experiments,
+        'elementor_version'  => $version,
+    ];
 }
 }`;
 

@@ -1,8 +1,22 @@
 # Elementor 4.0 "Atomic" Elements — Research & Implementation Plan
 
-> Status: **Research + design** (no code yet).
 > Source studied: [`msrbuilds/elementor-mcp`](https://github.com/msrbuilds/elementor-mcp) (a PHP plugin).
 > Goal: bring Elementor 4.0 atomic-element support into **our** Node.js MCP server.
+>
+> **Implementation status:**
+> - ✅ **Phase 0** — atomic-support detection: `agency-os/v1/elementor-atomic-status`
+>   probe route (in the `wp_bootstrap_elementor_writer` snippet) + `atomic` field
+>   on `wp_elementor_capabilities`.
+> - ✅ **Phase 1** — `elementor-atomic.js` format module (props/styles/factory +
+>   widget builders) with a `node:test` suite.
+> - ✅ **Phase 2** — `wp_elementor_add_atomic` builder tool (flat params → valid
+>   atomic JSON, with a pre-write support check); `wp_elementor_get_widget_settings`
+>   now returns `settings_readable`/`is_atomic` for V4 elements.
+> - ✅ **Phase 3 (conservative)** — writer route stamps `_elementor_version` and
+>   clears the CSS cache; kept raw-meta writes (not `Document::save()`) so atomic
+>   data persists byte-for-byte and the tools' byte-length verification stays exact.
+>
+> Remaining: validate against a **live Elementor 4.0 site** (see §6 open questions).
 
 ---
 
