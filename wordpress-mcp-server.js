@@ -384,6 +384,51 @@ function normalizeRequestOptions(options = {}) {
   return normalized;
 }
 
+// Pull per-request retry/timeout overrides out of the options bag so they reach
+// fetchWithRetry's third argument instead of being passed to fetch() as unknown
+// init fields. Callers that omit these get fetchWithRetry's defaults (30s, 3x).
+function splitRetryOptions(options = {}) {
+  const { timeoutMs, maxRetries, retryBaseMs, ...fetchInit } = options;
+  const retryConfig = {};
+  if (timeoutMs !== undefined) retryConfig.timeoutMs = timeoutMs;
+  if (maxRetries !== undefined) retryConfig.maxRetries = maxRetries;
+  if (retryBaseMs !== undefined) retryConfig.retryBaseMs = retryBaseMs;
+  return { retryConfig, fetchInit };
+}
+
+// Short-lived cache of the Elementor atomic-support probe, keyed by client. The
+// probe route calls Elementor's element registry, which is heavy on sites with
+// many addon packs, so we avoid re-running it on every capabilities/add_atomic
+// call. Positive results are cached for a minute; negatives only briefly, so a
+// freshly-bootstrapped or just-enabled atomic experiment is picked up quickly.
+const ATOMIC_STATUS_TTL_MS = 60000;
+const ATOMIC_STATUS_NEG_TTL_MS = 5000;
+const atomicStatusCache = new Map();
+
+// Fetch atomic-support status with a bounded timeout and no aggressive retry, so
+// a missing or slow probe route degrades in ~8s instead of blocking the tool for
+// the full 90s (30s × 3 GET retries). Returns the status object, or null when
+// the route is absent / doesn't answer in time. Pass force:true to bypass cache.
+async function probeAtomicStatus(wpReq, { clientKey = 'default', force = false } = {}) {
+  if (!force) {
+    const hit = atomicStatusCache.get(clientKey);
+    if (hit) {
+      const ttl = hit.status ? ATOMIC_STATUS_TTL_MS : ATOMIC_STATUS_NEG_TTL_MS;
+      if (Date.now() - hit.at < ttl) return hit.status;
+    }
+  }
+  let status = null;
+  try {
+    const res = await wpReq('/agency-os/v1/elementor-atomic-status', {
+      timeoutMs: 8000,
+      maxRetries: 1
+    });
+    if (res && typeof res === 'object') status = res;
+  } catch { /* route missing, locked down, or slow — treat as unknown */ }
+  atomicStatusCache.set(clientKey, { at: Date.now(), status });
+  return status;
+}
+
 function previewText(text, max = 500) {
   return String(text || '')
     .replace(/\s+/g, ' ')
@@ -445,15 +490,16 @@ async function wpRequest(endpoint, options = {}) {
   console.log(`🌐 wpRequest URL: ${url.replace(/consumer_secret=[^&]+/, 'consumer_secret=***')}`);
 
   const requestOptions = normalizeRequestOptions(options);
+  const { retryConfig, fetchInit } = splitRetryOptions(requestOptions);
 
   const response = await fetchWithRetry(url, {
-    ...requestOptions,
+    ...fetchInit,
     headers: {
       'Authorization': authHeader,
       'Content-Type': 'application/json',
-      ...requestOptions.headers
+      ...fetchInit.headers
     }
-  });
+  }, retryConfig);
 
   const text = await response.text();
   const data = parseWordPressJsonOrThrow({ text, response, url, clientName: initConfig.name || 'default' });
@@ -490,15 +536,16 @@ function createWpRequestForClient(clientConfig) {
     console.log(`🌐 wpRequestForClient [${clientConfig.name}] URL: ${url.replace(/consumer_secret=[^&]+/, 'consumer_secret=***')}`);
 
     const requestOptions = normalizeRequestOptions(options);
+    const { retryConfig, fetchInit } = splitRetryOptions(requestOptions);
 
     const response = await fetchWithRetry(url, {
-      ...requestOptions,
+      ...fetchInit,
       headers: {
         'Authorization': authHeader,
         'Content-Type': 'application/json',
-        ...requestOptions.headers
+        ...fetchInit.headers
       }
-    });
+    }, retryConfig);
 
     const text = await response.text();
     const data = parseWordPressJsonOrThrow({ text, response, url, clientName: clientConfig.name || 'unknown' });
@@ -2825,19 +2872,17 @@ async function executeTool(name, args, clientConfig = null) {
       // we report supported:null so the agent knows detection is unavailable.
       let atomic = {
         supported: null,
-        detail: 'Probe route not installed — run wp_bootstrap_elementor_writer to enable atomic detection.'
+        detail: 'Probe route not installed or not responding — run wp_bootstrap_elementor_writer to enable atomic detection.'
       };
-      try {
-        const status = await wpReq('/agency-os/v1/elementor-atomic-status');
-        if (status && typeof status === 'object') {
-          atomic = {
-            supported: !!status.atomic_supported,
-            registered_types: status.registered_types || [],
-            active_experiments: status.active_experiments || [],
-            elementor_version: status.elementor_version ?? elementorVersion
-          };
-        }
-      } catch { /* route missing or locked down — keep the null/unknown default */ }
+      const status = await probeAtomicStatus(wpReq, { clientKey: clientConfig?.name || 'default' });
+      if (status) {
+        atomic = {
+          supported: !!status.atomic_supported,
+          registered_types: status.registered_types || [],
+          active_experiments: status.active_experiments || [],
+          elementor_version: status.elementor_version ?? elementorVersion
+        };
+      }
 
       return {
         elementor: {
@@ -3072,21 +3117,19 @@ async function executeTool(name, args, clientConfig = null) {
       // element when available.
       let version = typeof args.version === 'string' ? args.version : '';
       let atomicWarning = null;
-      try {
-        const status = await wpReq('/agency-os/v1/elementor-atomic-status');
-        if (status && typeof status === 'object') {
-          if (!version && status.elementor_version) version = String(status.elementor_version);
-          if (status.atomic_supported === false && !args.skip_atomic_check) {
-            return {
-              inserted: false,
-              error: 'atomic_not_supported',
-              message: 'Elementor 4.0 atomic elements are not active on this site, so the write would be silently dropped. Enable the "Atomic Elements" / V4 experiment in Elementor → Settings → Features, or pass skip_atomic_check:true to build anyway.',
-              atomic: status
-            };
-          }
+      const status = await probeAtomicStatus(wpReq, { clientKey: clientConfig?.name || 'default' });
+      if (status) {
+        if (!version && status.elementor_version) version = String(status.elementor_version);
+        if (status.atomic_supported === false && !args.skip_atomic_check) {
+          return {
+            inserted: false,
+            error: 'atomic_not_supported',
+            message: 'Elementor 4.0 atomic elements are not active on this site, so the write would be silently dropped. Enable the "Atomic Elements" / V4 experiment in Elementor → Settings → Features, or pass skip_atomic_check:true to build anyway.',
+            atomic: status
+          };
         }
-      } catch {
-        atomicWarning = 'Atomic-support probe route not installed (run wp_bootstrap_elementor_writer). Built without a pre-check — verify the element persisted, and confirm the atomic experiment is active if it did not.';
+      } else {
+        atomicWarning = 'Atomic-support probe route did not respond (run wp_bootstrap_elementor_writer, or it may be slow). Built without a pre-check — verify the element persisted, and confirm the atomic experiment is active if it did not.';
       }
 
       // Build the element from flat params via the atomic format module.
@@ -4368,10 +4411,11 @@ async function executeTool(name, args, clientConfig = null) {
       const force = args.force || false;
       const steps = [];
 
-      // Treat anything other than rest_no_route as "route is live".
+      // Treat anything other than rest_no_route as "route is live". Bound the
+      // probe so a slow site doesn't hang verification for the full 30s default.
       const routeLive = async () => {
         try {
-          await wpReq('/agency-os/v1/elementor-data', { method: 'POST', body: JSON.stringify({}) });
+          await wpReq('/agency-os/v1/elementor-data', { method: 'POST', body: JSON.stringify({}), timeoutMs: 12000 });
           return true;
         } catch (error) {
           return !error.message.includes('rest_no_route');
@@ -4511,6 +4555,11 @@ function agency_os_elementor_atomic_status() {
       await new Promise(resolve => setTimeout(resolve, 1000));
       const verified = await routeLive();
       steps.push(verified ? 'Elementor write route verified!' : 'Route not responding yet — it may need a moment to register.');
+
+      // The snippet (re)registers the atomic-status route, so drop any cached
+      // probe result for this client — otherwise a stale "not installed" negative
+      // could linger for up to a minute and make capabilities/add_atomic lie.
+      atomicStatusCache.delete(clientConfig?.name || 'default');
 
       return {
         success: verified,
