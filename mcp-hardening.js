@@ -3,6 +3,11 @@
 
 export const DEFAULT_MAX_BODY_BYTES = parseInt(process.env.MCP_MAX_BODY_BYTES || '52428800', 10); // 50 MB
 export const DEFAULT_FETCH_TIMEOUT_MS = parseInt(process.env.WP_FETCH_TIMEOUT_MS || '30000', 10); // 30 s
+// Reads that transfer a whole page's _elementor_data blob (full page structure /
+// state) are the ones that time out on heavy Elementor pages. Give them a longer
+// ceiling until the server-side slim path (strudel-elementor/v1/structure) is
+// wired in as the preferred route. Override via WP_HEAVY_FETCH_TIMEOUT_MS.
+export const HEAVY_FETCH_TIMEOUT_MS = parseInt(process.env.WP_HEAVY_FETCH_TIMEOUT_MS || '60000', 10); // 60 s
 export const DEFAULT_FETCH_MAX_RETRIES = parseInt(process.env.WP_FETCH_MAX_RETRIES || '3', 10);
 
 const SENSITIVE_KEY_RE = /pass(word)?|secret|token|api[_-]?key|authorization|app[_-]?password|consumer[_-]?(key|secret)/i;

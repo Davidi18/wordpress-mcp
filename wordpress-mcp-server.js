@@ -39,6 +39,7 @@ import {
   fetchWithRetry,
   DEFAULT_MAX_BODY_BYTES,
   DEFAULT_FETCH_TIMEOUT_MS,
+  HEAVY_FETCH_TIMEOUT_MS,
   DEFAULT_FETCH_MAX_RETRIES
 } from './mcp-hardening.js';
 
@@ -3280,7 +3281,10 @@ async function executeTool(name, args, clientConfig = null) {
     // ── SURGICAL PRIMITIVES ──
     case 'wp_elementor_get_page_structure': {
       if (!args.page_id) throw new Error('page_id required');
-      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,title,meta`);
+      // Heavy read: transfers the entire _elementor_data blob. Use the longer
+      // ceiling so large pages don't time out before the slim server-side path
+      // is wired in.
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,title,meta`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       const tree = parseElementorData(page.meta?._elementor_data);
       const summary = summarizeTree(tree, { max_snippet_length: args.max_snippet_length });
       return {
