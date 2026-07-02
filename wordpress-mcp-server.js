@@ -15,6 +15,10 @@ import {
   patchElementById,
   duplicateElementById,
   insertElement,
+  removeElementById,
+  moveElementById,
+  reorderChildren,
+  findWidgets,
   normalizeWidget,
   summarizeTree
 } from './elementor-tree.js';
@@ -2042,6 +2046,84 @@ const tools = [
     }
   },
   {
+    name: 'wp_elementor_find_widgets',
+    description: 'Search a page\'s Elementor tree for widgets matching criteria, returning their ids, widgetType, ancestor-id chain, and a text snippet. Use this to LOCATE elements by what they are or contain (e.g. every "button", or the heading containing "Contact us") instead of eyeballing wp_elementor_get_page_structure. The returned ids feed wp_elementor_update_widget / _move_element / _remove_element / _duplicate_widget. Pure-REST — works on any Elementor site with no plugin needed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id' },
+        widget_type: { type: 'string', description: 'Exact widgetType to match (e.g. "heading", "button", "image")' },
+        text_contains: { type: 'string', description: 'Case-insensitive substring to match against any text field (title, editor, button text, testimonial, tab titles, etc.)' },
+        setting_equals: { type: 'object', description: 'Match widgets whose settings[key] strictly equals the given value, for each key/value pair provided.' }
+      },
+      required: ['page_id']
+    }
+  },
+  {
+    name: 'wp_elementor_move_element',
+    description: 'Relocate an element (widget, column, section, or container) to a new place in the page, preserving its id and all children. Use this to restructure a page without rebuilding it — e.g. move a CTA section above the fold, or move a widget into a different column. Returns `previous_state` for rollback. Pure-REST — no plugin needed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id' },
+        element_id: { type: 'string', description: 'Id of the element to move' },
+        position: {
+          description: 'Destination. Strings "start"/"end" or an integer = root level. Object forms: { after_id: "abc12345" } / { before_id: "abc12345" } = sibling of that element; { parent_id: "col1", position: "end"|"start"|N } = inside that parent. The destination must not be inside the element being moved.'
+        }
+      },
+      required: ['page_id', 'element_id', 'position']
+    }
+  },
+  {
+    name: 'wp_elementor_reorder_children',
+    description: 'Reorder the direct children of a container/section/column (or the root-level sections) to match a given id order. Children you omit keep their relative order and follow the ones you listed. Ideal for re-sequencing cards in a grid or sections on a page after you know their ids (from wp_elementor_get_page_structure / _find_widgets). Returns `previous_state` for rollback. Pure-REST — no plugin needed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id' },
+        parent_id: { type: ['string', 'null'], description: 'Id of the container whose children to reorder. Pass null to reorder the root-level (top) sections/containers.' },
+        order: { type: 'array', items: { type: 'string' }, description: 'Child element ids in the desired order. Ids not currently children are ignored; current children you omit are appended after, keeping their relative order.' }
+      },
+      required: ['page_id', 'order']
+    }
+  },
+  {
+    name: 'wp_elementor_remove_element',
+    description: 'Delete an element (widget, column, section, or container) and all its children from a page by id. Returns `previous_state` so the removal can be undone with wp_restore_page_state. Pure-REST — no plugin needed. To find the id first, use wp_elementor_get_page_structure or wp_elementor_find_widgets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id' },
+        element_id: { type: 'string', description: 'Id of the element to remove' }
+      },
+      required: ['page_id', 'element_id']
+    }
+  },
+  {
+    name: 'wp_elementor_batch_update_widgets',
+    description: 'Apply several element setting-patches to a page in ONE write (one fetch, one save, one rollback state) instead of calling wp_elementor_update_widget N times. Much cheaper and atomic for multi-element edits — e.g. recolor every button, or set text on each card in a duplicated grid. Each edit is a shallow merge by default (pass replace_settings:true per edit to swap the whole settings object). Returns `previous_state` for rollback. Pure-REST — no plugin needed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page id' },
+        edits: {
+          type: 'array',
+          description: 'List of per-element edits, applied in order.',
+          items: {
+            type: 'object',
+            properties: {
+              element_id: { type: 'string', description: 'Element id to patch' },
+              settings_patch: { type: 'object', description: 'Settings to merge (or replace) into the element' },
+              replace_settings: { type: 'boolean', description: 'Replace the whole settings object instead of shallow-merging.', default: false }
+            },
+            required: ['element_id', 'settings_patch']
+          }
+        }
+      },
+      required: ['page_id', 'edits']
+    }
+  },
+  {
     name: 'wp_elementor_add_atomic',
     description: 'Add an Elementor 4.0 "atomic" (V4) element to a page using flat, AI-friendly params — no need to hand-write the $$type-wrapped JSON the atomic engine requires. Builds e-flexbox/e-div-block containers (with layout styles applied as a local style class) and atomic widgets (e-heading, e-paragraph, e-button, e-image, e-svg, e-youtube, e-self-hosted-video, e-divider). IMPORTANT: atomic elements only persist on sites where the atomic experiment is active — call wp_elementor_capabilities first (the `atomic` field) or rely on this tool\'s built-in pre-check (run wp_bootstrap_elementor_writer once so the check is authoritative). To nest widgets inside a container, add the container first, then add children with position:{ parent_id: <returned element_id> }.',
     inputSchema: {
@@ -3279,6 +3361,145 @@ async function executeTool(name, args, clientConfig = null) {
         page_id: args.page_id,
         element_id: insertedId,
         widgetType: widget.widgetType || null,
+        verified: verifyBytes === serialized.length,
+        bytes_written: serialized.length,
+        previous_state: previousState
+      };
+    }
+
+    case 'wp_elementor_find_widgets': {
+      if (!args.page_id) throw new Error('page_id required');
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
+      const tree = parseElementorData(page.meta?._elementor_data);
+      const matches = findWidgets(tree, {
+        widget_type: args.widget_type,
+        text_contains: args.text_contains,
+        setting_equals: args.setting_equals && typeof args.setting_equals === 'object' ? args.setting_equals : undefined
+      });
+      return { page_id: args.page_id, count: matches.length, matches };
+    }
+
+    case 'wp_elementor_move_element': {
+      if (!args.page_id) throw new Error('page_id required');
+      if (!args.element_id) throw new Error('element_id required');
+      if (args.position === undefined) throw new Error('position required');
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const previousState = extractPageState(page);
+      const tree = parseElementorData(page.meta?._elementor_data);
+
+      const { tree: newTree, movedId } = moveElementById(tree, args.element_id, args.position);
+      if (!movedId) throw new Error(`Element ${args.element_id} not found on page ${args.page_id}`);
+
+      const serialized = JSON.stringify(newTree);
+      await writeElementorData(wpReq, args.page_id, serialized);
+
+      const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
+      const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
+
+      return {
+        moved: true,
+        page_id: args.page_id,
+        element_id: args.element_id,
+        verified: verifyBytes === serialized.length,
+        bytes_written: serialized.length,
+        previous_state: previousState
+      };
+    }
+
+    case 'wp_elementor_reorder_children': {
+      if (!args.page_id) throw new Error('page_id required');
+      if (!Array.isArray(args.order)) throw new Error('order (array of element ids) required');
+      const parentId = args.parent_id === undefined ? null : args.parent_id;
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const previousState = extractPageState(page);
+      const tree = parseElementorData(page.meta?._elementor_data);
+
+      const { tree: newTree, ok, order } = reorderChildren(tree, parentId, args.order);
+      if (!ok) throw new Error(`Parent ${parentId} not found on page ${args.page_id}`);
+
+      const serialized = JSON.stringify(newTree);
+      await writeElementorData(wpReq, args.page_id, serialized);
+
+      const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
+      const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
+
+      return {
+        reordered: true,
+        page_id: args.page_id,
+        parent_id: parentId,
+        order,
+        verified: verifyBytes === serialized.length,
+        bytes_written: serialized.length,
+        previous_state: previousState
+      };
+    }
+
+    case 'wp_elementor_remove_element': {
+      if (!args.page_id) throw new Error('page_id required');
+      if (!args.element_id) throw new Error('element_id required');
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const previousState = extractPageState(page);
+      const tree = parseElementorData(page.meta?._elementor_data);
+
+      const { tree: newTree, removed } = removeElementById(tree, args.element_id);
+      if (!removed) throw new Error(`Element ${args.element_id} not found on page ${args.page_id}`);
+
+      const serialized = JSON.stringify(newTree);
+      await writeElementorData(wpReq, args.page_id, serialized);
+
+      const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
+      const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
+
+      return {
+        removed: true,
+        page_id: args.page_id,
+        element_id: args.element_id,
+        removed_type: removed.widgetType || removed.elType || null,
+        verified: verifyBytes === serialized.length,
+        bytes_written: serialized.length,
+        previous_state: previousState
+      };
+    }
+
+    case 'wp_elementor_batch_update_widgets': {
+      if (!args.page_id) throw new Error('page_id required');
+      if (!Array.isArray(args.edits) || args.edits.length === 0) throw new Error('edits (non-empty array) required');
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const previousState = extractPageState(page);
+      let tree = parseElementorData(page.meta?._elementor_data);
+
+      const applied = [];
+      const notFound = [];
+      for (const edit of args.edits) {
+        if (!edit || !edit.element_id || !edit.settings_patch || typeof edit.settings_patch !== 'object') {
+          throw new Error('each edit needs element_id and settings_patch (object)');
+        }
+        const next = patchElementById(tree, edit.element_id, (el) => ({
+          ...el,
+          settings: edit.replace_settings
+            ? { ...edit.settings_patch }
+            : { ...el.settings, ...edit.settings_patch }
+        }));
+        if (!next) { notFound.push(edit.element_id); continue; }
+        tree = next;
+        applied.push(edit.element_id);
+      }
+      if (applied.length === 0) {
+        throw new Error(`No matching elements on page ${args.page_id} (not found: ${notFound.join(', ')})`);
+      }
+
+      const serialized = JSON.stringify(tree);
+      await writeElementorData(wpReq, args.page_id, serialized);
+
+      const verify = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,meta`);
+      const verifyBytes = typeof verify?.meta?._elementor_data === 'string' ? verify.meta._elementor_data.length : 0;
+
+      return {
+        updated: true,
+        page_id: args.page_id,
+        applied,
+        not_found: notFound,
+        applied_count: applied.length,
         verified: verifyBytes === serialized.length,
         bytes_written: serialized.length,
         previous_state: previousState
