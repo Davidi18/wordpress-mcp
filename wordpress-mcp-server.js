@@ -429,6 +429,76 @@ async function probeAtomicStatus(wpReq, { clientKey = 'default', force = false }
   return status;
 }
 
+// --- Strudel Elementor module (strudel-elementor/v1) ----------------------
+// The Strudel AI Optimizer plugin (v0.6.0+) ships an Elementor module exposing
+// server-side Elementor APIs the pure-REST path can't reach: CSS regeneration
+// after an _elementor_data write, and the live widget registry. The module
+// registers /capabilities UNCONDITIONALLY, so we can tell three states apart:
+//   - call throws rest_no_route (404)  -> plugin missing or pre-0.6.0
+//   - caps.elementor_active === false  -> plugin present, Elementor inactive
+//   - caps.features.<x> === true       -> that rich feature is usable
+// Positive probes cached for a minute; negatives briefly, so a freshly deployed
+// or just-upgraded plugin is picked up quickly. Mirrors probeAtomicStatus.
+const ELEMENTOR_MODULE_TTL_MS = 60000;
+const ELEMENTOR_MODULE_NEG_TTL_MS = 5000;
+const elementorModuleCache = new Map();
+
+async function probeElementorModule(wpReq, { clientKey = 'default', force = false } = {}) {
+  if (!force) {
+    const hit = elementorModuleCache.get(clientKey);
+    if (hit) {
+      const ttl = hit.caps ? ELEMENTOR_MODULE_TTL_MS : ELEMENTOR_MODULE_NEG_TTL_MS;
+      if (Date.now() - hit.at < ttl) return hit.caps;
+    }
+  }
+  let caps = null;
+  try {
+    const res = await wpReq('/strudel-elementor/v1/capabilities', {
+      timeoutMs: 8000,
+      maxRetries: 1
+    });
+    if (res && typeof res === 'object') caps = res;
+  } catch { /* rest_no_route (plugin missing/old), locked down, or slow */ }
+  elementorModuleCache.set(clientKey, { at: Date.now(), caps });
+  return caps;
+}
+
+// True when the module reports a given feature is usable (module present,
+// Elementor active, feature flag on). Tolerant of payload-shape drift.
+function moduleFeatureOn(caps, feature) {
+  if (!caps || typeof caps !== 'object') return false;
+  if (caps.elementor_active === false) return false;
+  const features = caps.features && typeof caps.features === 'object' ? caps.features : null;
+  if (features && feature in features) return features[feature] === true;
+  // Looser payloads without a features map: assume on when Elementor is active.
+  return caps.elementor_active !== false;
+}
+
+// Best-effort CSS regeneration after an Elementor write. NEVER throws — a
+// missing module, inactive Elementor, or slow route degrades to a no-op with a
+// reason, so callers can attach the result without risking the underlying write.
+async function regenerateElementorCss(wpReq, postId, { scope = 'post', clientKey = 'default' } = {}) {
+  const caps = await probeElementorModule(wpReq, { clientKey });
+  if (!caps) return { regenerated: false, reason: 'module_absent' };
+  if (!moduleFeatureOn(caps, 'regenerate_css')) {
+    return {
+      regenerated: false,
+      reason: caps.elementor_active === false ? 'elementor_inactive' : 'feature_unavailable'
+    };
+  }
+  try {
+    const res = await wpReq('/strudel-elementor/v1/regenerate-css', {
+      method: 'POST',
+      body: { post_id: postId, scope },
+      timeoutMs: 12000,
+      maxRetries: 1
+    });
+    return { regenerated: res?.regenerated !== false, method: res?.method || null, scope };
+  } catch (error) {
+    return { regenerated: false, reason: 'request_failed', detail: error.message };
+  }
+}
+
 function previewText(text, max = 500) {
   return String(text || '')
     .replace(/\s+/g, ' ')
@@ -1859,6 +1929,46 @@ const tools = [
     }
   },
 
+  // ── STRUDEL ELEMENTOR MODULE — server-side Elementor APIs (plugin v0.6.0+) ──
+  // These wrap the strudel-elementor/v1 endpoints from the Strudel AI Optimizer
+  // plugin. They only work on sites running that plugin with Elementor active;
+  // otherwise they return a clear "module unavailable" status instead of failing.
+  {
+    name: 'wp_elementor_regenerate_css',
+    description: 'Regenerate Elementor\'s cached CSS for a page after its _elementor_data was written. Core REST writes to _elementor_data leave Elementor\'s per-post CSS file stale, so style/layout changes may not show until an editor re-save. This forces a server-side regeneration via the Strudel Elementor module. Requires the Strudel AI Optimizer plugin (v0.6.0+) with Elementor active — returns { regenerated:false, reason } when unavailable (safe no-op). Use scope:"all" (admin-only) after a global Kit/colors/typography change.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'number', description: 'Page/post id whose Elementor CSS to regenerate' },
+        scope: { type: 'string', enum: ['post', 'all'], description: '"post" (default) regenerates just this page; "all" clears the global Elementor CSS cache (requires manage_options).', default: 'post' }
+      },
+      required: ['page_id']
+    }
+  },
+  {
+    name: 'wp_elementor_list_widget_types',
+    description: 'List the Elementor widget types actually registered on this site (core, Pro, and addon-pack widgets), with title, categories, keywords and an is_pro flag. Unlike the curated block library, this reflects the live registry — use it to discover what widgets are available before authoring. Requires the Strudel AI Optimizer plugin (v0.6.0+) with Elementor active.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        search: { type: 'string', description: 'Optional filter on widget name/title' },
+        category: { type: 'string', description: 'Optional filter on widget category (e.g. "basic", "pro-elements")' }
+      }
+    }
+  },
+  {
+    name: 'wp_elementor_get_widget_schema',
+    description: 'Get the control schema for a single Elementor widget type from the live registry: each control\'s name, type, label, default, and options. Use this to learn exactly which settings keys a widget accepts before building it with wp_elementor_insert_widget. Defaults to content-tab controls (what you need to author); pass tab:"all" for style/advanced too. Requires the Strudel AI Optimizer plugin (v0.6.0+) with Elementor active.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        widget: { type: 'string', description: 'Widget type name from wp_elementor_list_widget_types (e.g. "heading", "button", "image")' },
+        tab: { type: 'string', enum: ['content', 'all'], description: '"content" (default) returns only content-tab controls; "all" also returns style/advanced controls.', default: 'content' }
+      },
+      required: ['widget']
+    }
+  },
+
   // ── SURGICAL PRIMITIVES — address Elementor elements by id ──
   // Inspect, patch, duplicate, or insert a single element without touching the
   // rest of the page. Mutating tools return `previous_state` for rollback.
@@ -2884,6 +2994,22 @@ async function executeTool(name, args, clientConfig = null) {
         };
       }
 
+      // Strudel Elementor module: server-side endpoints (CSS regen, widget
+      // registry) available when the Strudel AI Optimizer plugin v0.6.0+ is
+      // installed. present:false => plugin missing or pre-0.6.0.
+      const moduleCaps = await probeElementorModule(wpReq, { clientKey: clientConfig?.name || 'default' });
+      const strudelModule = moduleCaps
+        ? {
+            present: true,
+            module_version: moduleCaps.module_version ?? null,
+            elementor_active: moduleCaps.elementor_active !== false,
+            features: {
+              regenerate_css: moduleFeatureOn(moduleCaps, 'regenerate_css'),
+              widget_schemas: moduleFeatureOn(moduleCaps, 'widget_schemas')
+            }
+          }
+        : { present: false, detail: 'Strudel Elementor module not detected (install/upgrade the Strudel AI Optimizer plugin to v0.6.0+).' };
+
       return {
         elementor: {
           installed: elementorVersion !== null || ('elementor' in detected),
@@ -2897,10 +3023,66 @@ async function executeTool(name, args, clientConfig = null) {
         },
         container_experiment_likely: containerLikely,
         atomic,
+        strudel_module: strudelModule,
         active_kit_id: activeKitId,
         addon_packs: detected,
         plugins_endpoint_accessible: plugins.length > 0
       };
+    }
+
+    case 'wp_elementor_regenerate_css': {
+      if (typeof args.page_id !== 'number') throw new Error('page_id (number) required');
+      const scope = args.scope === 'all' ? 'all' : 'post';
+      const result = await regenerateElementorCss(wpReq, args.page_id, {
+        scope,
+        clientKey: clientConfig?.name || 'default'
+      });
+      if (!result.regenerated) {
+        const hint = {
+          module_absent: 'Strudel AI Optimizer plugin missing or older than v0.6.0 — CSS regeneration endpoint not available.',
+          elementor_inactive: 'Elementor is not active on this site.',
+          feature_unavailable: 'The regenerate_css feature is not reported by the module.',
+          request_failed: 'The regenerate-css request failed.'
+        }[result.reason] || 'CSS regeneration was not performed.';
+        return { ...result, page_id: args.page_id, hint };
+      }
+      return { ...result, page_id: args.page_id };
+    }
+
+    case 'wp_elementor_list_widget_types': {
+      const caps = await probeElementorModule(wpReq, { clientKey: clientConfig?.name || 'default' });
+      if (!moduleFeatureOn(caps, 'widget_schemas')) {
+        return {
+          available: false,
+          reason: !caps ? 'module_absent' : (caps.elementor_active === false ? 'elementor_inactive' : 'feature_unavailable'),
+          hint: 'Requires the Strudel AI Optimizer plugin (v0.6.0+) with Elementor active. Fall back to wp_elementor_list_blocks for curated blocks.'
+        };
+      }
+      const qs = [];
+      if (args.search) qs.push(`search=${encodeURIComponent(args.search)}`);
+      if (args.category) qs.push(`category=${encodeURIComponent(args.category)}`);
+      const path = `/strudel-elementor/v1/widgets${qs.length ? `?${qs.join('&')}` : ''}`;
+      const widgets = await wpReq(path, { timeoutMs: 12000 });
+      const list = Array.isArray(widgets) ? widgets : (widgets?.widgets || []);
+      return { available: true, count: list.length, widgets: list };
+    }
+
+    case 'wp_elementor_get_widget_schema': {
+      if (!args.widget || typeof args.widget !== 'string') throw new Error('widget (string) required');
+      const caps = await probeElementorModule(wpReq, { clientKey: clientConfig?.name || 'default' });
+      if (!moduleFeatureOn(caps, 'widget_schemas')) {
+        return {
+          available: false,
+          reason: !caps ? 'module_absent' : (caps.elementor_active === false ? 'elementor_inactive' : 'feature_unavailable'),
+          hint: 'Requires the Strudel AI Optimizer plugin (v0.6.0+) with Elementor active.'
+        };
+      }
+      const tab = args.tab === 'all' ? 'all' : 'content';
+      const schema = await wpReq(
+        `/strudel-elementor/v1/widgets/${encodeURIComponent(args.widget)}?tab=${tab}`,
+        { timeoutMs: 12000 }
+      );
+      return { available: true, tab, ...schema };
     }
 
     case 'wp_set_static_front_page': {
