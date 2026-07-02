@@ -504,6 +504,52 @@ async function regenerateElementorCss(wpReq, postId, { scope = 'post', clientKey
   }
 }
 
+// Fetch a page's Elementor structure via the server-side slim endpoint when the
+// Strudel module exposes it. The payload is a few KB (element tree + label +
+// widget-type histogram) instead of the whole _elementor_data blob — the blob
+// transfer is what times out on heavy pages. Returns null to signal the caller
+// should fall back to the core full-page read (module absent, feature off, or a
+// non-Elementor post). NEVER throws.
+async function fetchElementorStructureViaModule(wpReq, postId, { clientKey = wpReq?.clientKey || 'default', labels = true, maxDepth } = {}) {
+  const caps = await probeElementorModule(wpReq, { clientKey });
+  if (!moduleFeatureOn(caps, 'structure')) return null;
+  const params = new URLSearchParams();
+  if (labels === false) params.set('labels', '0');
+  if (Number.isInteger(maxDepth)) params.set('max_depth', String(maxDepth));
+  const qs = params.toString();
+  const path = `/strudel-elementor/v1/structure/${postId}${qs ? `?${qs}` : ''}`;
+  try {
+    const res = await wpReq(path, { timeoutMs: 15000, maxRetries: 1 });
+    if (!res || typeof res !== 'object' || !Array.isArray(res.tree)) return null;
+    return res;
+  } catch {
+    // 404 (not an Elementor post), locked down, or slow -> fall back to core.
+    return null;
+  }
+}
+
+// Adapt the module's slim structure to the shape wp_elementor_get_page_structure
+// has always returned (stats + tree with `snippet`), so consumers don't change.
+// The module tree is small, so re-walking it here is cheap.
+function adaptModuleStructure(mod) {
+  const stats = { sections: 0, columns: 0, containers: 0, widgets: 0, total: 0 };
+  function node(el) {
+    stats.total++;
+    if (el.elType === 'section') stats.sections++;
+    else if (el.elType === 'column') stats.columns++;
+    else if (el.elType === 'container') stats.containers++;
+    else if (el.elType === 'widget') stats.widgets++;
+    const out = { id: el.id, elType: el.elType };
+    if (el.widgetType) out.widgetType = el.widgetType;
+    if (el.label) out.snippet = el.label;
+    if (Number.isInteger(el.children_count)) out.children_count = el.children_count;
+    if (Array.isArray(el.children)) out.children = el.children.map(node);
+    return out;
+  }
+  const tree = Array.isArray(mod.tree) ? mod.tree.map(node) : [];
+  return { stats, tree, widget_types: mod.widget_types || {} };
+}
+
 function previewText(text, max = 500) {
   return String(text || '')
     .replace(/\s+/g, ' ')
@@ -1993,12 +2039,13 @@ const tools = [
   // rest of the page. Mutating tools return `previous_state` for rollback.
   {
     name: 'wp_elementor_get_page_structure',
-    description: 'Return a compact navigable summary of a page\'s Elementor tree: every element\'s id, elType, widgetType, and a short text snippet — without the heavy `settings` payload. Use this BEFORE wp_elementor_update_widget / wp_elementor_duplicate_widget so you know which id to act on. Much cheaper than parsing the full _elementor_data.',
+    description: 'Return a compact navigable summary of a page\'s Elementor tree: every element\'s id, elType, widgetType, and a short text snippet — without the heavy `settings` payload. Use this BEFORE wp_elementor_update_widget / wp_elementor_duplicate_widget so you know which id to act on. Much cheaper than parsing the full _elementor_data. When the Strudel Elementor module (v0.8.0+) is installed the summary is built SERVER-SIDE and only a few KB cross the wire (avoids the timeouts seen on heavy pages); otherwise it falls back to a full-page read. `source` in the response is "strudel_module" or "core". The module path also returns a `widget_types` histogram.',
     inputSchema: {
       type: 'object',
       properties: {
         page_id: { type: 'number', description: 'Page id' },
-        max_snippet_length: { type: 'number', description: 'Max chars per widget snippet (default 80)', default: 80 }
+        max_snippet_length: { type: 'number', description: 'Max chars per widget snippet (default 80) — core fallback path only', default: 80 },
+        max_depth: { type: 'number', description: 'Limit tree depth (module path only). Nodes past the limit report children_count instead of expanding. Omit for the full tree.' }
       },
       required: ['page_id']
     }
@@ -3136,7 +3183,9 @@ async function executeTool(name, args, clientConfig = null) {
             elementor_active: moduleCaps.elementor_active !== false,
             features: {
               regenerate_css: moduleFeatureOn(moduleCaps, 'regenerate_css'),
-              widget_schemas: moduleFeatureOn(moduleCaps, 'widget_schemas')
+              widget_schemas: moduleFeatureOn(moduleCaps, 'widget_schemas'),
+              global_kit: moduleFeatureOn(moduleCaps, 'global_kit'),
+              structure: moduleFeatureOn(moduleCaps, 'structure')
             }
           }
         : { present: false, detail: 'Strudel Elementor module not detected (install/upgrade the Strudel AI Optimizer plugin to v0.6.0+).' };
@@ -3281,9 +3330,35 @@ async function executeTool(name, args, clientConfig = null) {
     // ── SURGICAL PRIMITIVES ──
     case 'wp_elementor_get_page_structure': {
       if (!args.page_id) throw new Error('page_id required');
-      // Heavy read: transfers the entire _elementor_data blob. Use the longer
-      // ceiling so large pages don't time out before the slim server-side path
-      // is wired in.
+      const clientKey = clientConfig?.name || 'default';
+
+      // Prefer the server-side slim endpoint (Strudel module v0.8.0+): a few-KB
+      // map instead of the whole _elementor_data blob, which is what times out
+      // on heavy pages. Returns null -> fall back to the core full-page read.
+      const mod = await fetchElementorStructureViaModule(wpReq, args.page_id, {
+        clientKey,
+        maxDepth: Number.isInteger(args.max_depth) ? args.max_depth : undefined
+      });
+      if (mod) {
+        const adapted = adaptModuleStructure(mod);
+        // Title via a tiny fields-limited read (small/fast) to keep the contract.
+        let pageTitle = '';
+        try {
+          const meta = await wpReq(`/wp/v2/pages/${args.page_id}?_fields=id,title`, { timeoutMs: 10000, maxRetries: 1 });
+          pageTitle = meta?.title?.rendered || '';
+        } catch { /* title is best-effort */ }
+        return {
+          page_id: Number(args.page_id),
+          page_title: pageTitle,
+          stats: adapted.stats,
+          widget_types: adapted.widget_types,
+          tree: adapted.tree,
+          source: 'strudel_module'
+        };
+      }
+
+      // Fallback: core full-page read. Transfers the entire _elementor_data blob,
+      // so use the longer ceiling to avoid timing out on large pages.
       const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit&_fields=id,title,meta`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       const tree = parseElementorData(page.meta?._elementor_data);
       const summary = summarizeTree(tree, { max_snippet_length: args.max_snippet_length });
@@ -3291,7 +3366,8 @@ async function executeTool(name, args, clientConfig = null) {
         page_id: page.id,
         page_title: page.title?.rendered || '',
         stats: summary.stats,
-        tree: summary.tree
+        tree: summary.tree,
+        source: 'core'
       };
     }
 
