@@ -265,6 +265,55 @@ export function insertElement(tree, newElement, position = 'end') {
   throw new Error(`Unsupported position: ${JSON.stringify(position)}`);
 }
 
+// Move the element with the given id to a new position, preserving its id and
+// full subtree. `position` uses the same grammar as insertElement() ('start' /
+// 'end' / N / { parent_id, position? } / { after_id } / { before_id }).
+// Returns { tree, movedId } or { tree, movedId: null } if the element wasn't
+// found. Throws if the destination anchor is the moved element itself or lives
+// inside its own subtree (which would detach the tree).
+export function moveElementById(tree, id, position) {
+  const { tree: without, removed } = removeElementById(tree, id);
+  if (!removed) return { tree, movedId: null };
+  if (position && typeof position === 'object') {
+    const anchorId = position.parent_id || position.after_id || position.before_id;
+    if (anchorId && !findElementById(without, anchorId)) {
+      throw new Error(`Move destination "${anchorId}" not found, or is inside the element being moved`);
+    }
+  }
+  const { tree: next, insertedId } = insertElement(without, removed, position);
+  return { tree: next, movedId: insertedId };
+}
+
+// Reorder the direct children of a container to match `orderedIds`. Children
+// not listed keep their relative order and are appended after the listed ones;
+// ids that aren't current children are ignored. Pass parentId = null to reorder
+// the root-level elements. Returns { tree, ok, order } (ok:false if parent not
+// found).
+export function reorderChildren(tree, parentId, orderedIds) {
+  const ids = Array.isArray(orderedIds) ? orderedIds : [];
+  const reorder = (children) => {
+    const list = Array.isArray(children) ? children : [];
+    const byId = new Map(list.map(c => [c.id, c]));
+    const seen = new Set();
+    const next = [];
+    for (const id of ids) {
+      const c = byId.get(id);
+      if (c && !seen.has(id)) { next.push(c); seen.add(id); }
+    }
+    for (const c of list) if (!seen.has(c.id)) next.push(c);
+    return next;
+  };
+  if (parentId == null) {
+    const next = reorder(tree);
+    return { tree: next, ok: true, order: next.map(c => c.id) };
+  }
+  const hit = findElementById(tree, parentId);
+  if (!hit) return { tree, ok: false };
+  const next = reorder(hit.element.elements);
+  const newTree = patchElementById(tree, parentId, (p) => ({ ...p, elements: next }));
+  return { tree: newTree || tree, ok: true, order: next.map(c => c.id) };
+}
+
 // Strip HTML tags from a string and collapse whitespace. Used for snippets.
 function stripHtml(str) {
   if (typeof str !== 'string') return '';

@@ -7,6 +7,12 @@
 ## [Unreleased]
 
 ### ✨ Added
+- **פעולות מבנה כירורגיות על עץ ה-Elementor (pure-REST, ללא תלות בתוסף)** — חמישה כלים חדשים שמנצלים את ספריית ה-`elementor-tree.js` הקיימת, לעריכת מבנה עמוד בלי לבנות אותו מחדש. כולם מחזירים `previous_state` ל-rollback:
+  - **`wp_elementor_find_widgets`** — איתור widgets בעמוד לפי `widget_type` / טקסט מוכל / התאמת `settings` — מחזיר ids, שרשרת אבות, ו-snippet. הזנה לכלים שפועלים לפי id.
+  - **`wp_elementor_move_element`** — העברת אלמנט (widget/עמודה/section/container) למקום חדש בעמוד, תוך שמירת ה-id והילדים. חסום מהעברה לתוך תת-העץ של עצמו.
+  - **`wp_elementor_reorder_children`** — סידור מחדש של ילדי container (או ה-sections ברמת השורש עם `parent_id:null`) לפי סדר ids נתון.
+  - **`wp_elementor_remove_element`** — מחיקת אלמנט וכל ילדיו לפי id.
+  - **`wp_elementor_batch_update_widgets`** — מספר patches לאלמנטים שונים בכתיבה אחת (fetch/save/rollback יחיד) במקום N קריאות ל-`wp_elementor_update_widget`. אטומי וזול. כולל חבילת בדיקות `elementor-tree.test.js`.
 - **אינטגרציה עם מודול ה-Elementor של תוסף Strudel AI Optimizer (v0.6.0+)** — צד ה-MCP למודול `strudel-elementor/v1` שרץ בתוך WordPress וחושף APIs של Elementor שנתיב ה-REST הטהור לא מגיע אליהם. `probeElementorModule` מזהה את המודול דרך `/capabilities` (שרשום תמיד), ומבחין בין "תוסף חסר/ישן" (404), "Elementor לא פעיל" (`elementor_active:false`), ו-"פיצ'ר זמין". כל הכלים החדשים מתדרדרים בחן ל-`{ available:false, reason }` כשהמודול לא נוכח — לא שוברים אתרים בלי התוסף. `wp_elementor_capabilities` מחזיר כעת שדה `strudel_module`. המפרט המלא: `STRUDEL-ELEMENTOR-MODULE-SPEC.md`.
 - **`wp_elementor_regenerate_css`** — מפעיל רגנרציה של ה-CSS המטומן של Elementor לעמוד אחרי כתיבת `_elementor_data`, דרך המודול. גרסה כירורגית (per-post, מיידית) של ניקוי המטמון: משלימה את הנתיב שבו הכתיבה נפלה ל-core REST (fallback) שאין בו ניקוי מטמון כלל. `scope:"all"` (אדמין) לניקוי גלובלי אחרי שינוי Kit/צבעים/טיפוגרפיה.
 - **`wp_elementor_list_widget_types` / `wp_elementor_get_widget_schema`** — גילוי ה-widgets הרשומים בפועל באתר (core/Pro/addon-packs) והסכימה שלהם (name/type/label/default/options) מה-registry החי של Elementor — משהו שמעל REST אי אפשר. הפער העיקרי שנסגר מול [`msrbuilds/elementor-mcp`](https://github.com/msrbuilds/elementor-mcp). ברירת מחדל: controls של טאב התוכן; `tab:"all"` גם style/advanced.
