@@ -3899,7 +3899,14 @@ async function executeTool(name, args, clientConfig = null) {
     case 'wp_get_page_state': {
       const postId = args.post_id;
       if (!postId) throw new Error('post_id required');
-      const page = await wpReq(`/wp/v2/pages/${postId}?context=edit`);
+      // Heaviest read in the toolset: a full rollback snapshot needs the whole
+      // _elementor_data blob, so it can't be slimmed. But scope it to only the
+      // fields extractPageState() reads (drops _links / yoast_head / embedded
+      // extras), and give it the 60s ceiling so it stops timing out at 30s.
+      const page = await wpReq(
+        `/wp/v2/pages/${postId}?context=edit&_fields=id,title,content,excerpt,status,template,menu_order,featured_media,meta`,
+        { timeoutMs: HEAVY_FETCH_TIMEOUT_MS }
+      );
       if (!page || !page.id) throw new Error(`Page ${postId} not found`);
       return { state: extractPageState(page) };
     }
