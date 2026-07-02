@@ -2927,7 +2927,7 @@ async function executeTool(name, args, clientConfig = null) {
 
     // ELEMENTOR
     case 'wp_elementor_get_page': {
-      const page = await wpReq(`/wp/v2/pages/${args.id}?context=edit`);
+      const page = await wpReq(`/wp/v2/pages/${args.id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       return page;
     }
 
@@ -2990,7 +2990,7 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_elementor_download_page': {
-      const pageData = await wpReq(`/wp/v2/pages/${args.id}?context=edit`);
+      const pageData = await wpReq(`/wp/v2/pages/${args.id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       if (args.only_elementor_data) {
         const elementorData = pageData.meta?._elementor_data ?? '';
         fs.writeFileSync(
@@ -3041,7 +3041,7 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_elementor_get_template': {
-      const template = await wpReq(`/wp/v2/elementor_library/${args.id}?context=edit`);
+      const template = await wpReq(`/wp/v2/elementor_library/${args.id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       return template;
     }
 
@@ -3303,7 +3303,7 @@ async function executeTool(name, args, clientConfig = null) {
 
     case 'wp_elementor_insert_block': {
       const block = await getBlock(args.block_id);
-      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       const currentSections = parseElementorData(page.meta?._elementor_data);
 
       let position = args.position ?? 'end';
@@ -3401,7 +3401,7 @@ async function executeTool(name, args, clientConfig = null) {
       if (!args.settings_patch || typeof args.settings_patch !== 'object') {
         throw new Error('settings_patch (object) required');
       }
-      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       const previousState = extractPageState(page);
       const tree = parseElementorData(page.meta?._elementor_data);
 
@@ -3441,7 +3441,7 @@ async function executeTool(name, args, clientConfig = null) {
       if (!args.page_id) throw new Error('page_id required');
       if (!args.element_id) throw new Error('element_id required');
       const where = args.position || 'after';
-      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       const previousState = extractPageState(page);
       const tree = parseElementorData(page.meta?._elementor_data);
 
@@ -3472,7 +3472,7 @@ async function executeTool(name, args, clientConfig = null) {
       if (args.position === undefined) throw new Error('position required');
 
       const widget = normalizeWidget(args.widget);
-      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       const previousState = extractPageState(page);
       const tree = parseElementorData(page.meta?._elementor_data);
 
@@ -3511,7 +3511,7 @@ async function executeTool(name, args, clientConfig = null) {
       if (!args.page_id) throw new Error('page_id required');
       if (!args.element_id) throw new Error('element_id required');
       if (args.position === undefined) throw new Error('position required');
-      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       const previousState = extractPageState(page);
       const tree = parseElementorData(page.meta?._elementor_data);
 
@@ -3538,7 +3538,7 @@ async function executeTool(name, args, clientConfig = null) {
       if (!args.page_id) throw new Error('page_id required');
       if (!Array.isArray(args.order)) throw new Error('order (array of element ids) required');
       const parentId = args.parent_id === undefined ? null : args.parent_id;
-      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       const previousState = extractPageState(page);
       const tree = parseElementorData(page.meta?._elementor_data);
 
@@ -3565,7 +3565,7 @@ async function executeTool(name, args, clientConfig = null) {
     case 'wp_elementor_remove_element': {
       if (!args.page_id) throw new Error('page_id required');
       if (!args.element_id) throw new Error('element_id required');
-      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       const previousState = extractPageState(page);
       const tree = parseElementorData(page.meta?._elementor_data);
 
@@ -3592,7 +3592,7 @@ async function executeTool(name, args, clientConfig = null) {
     case 'wp_elementor_batch_update_widgets': {
       if (!args.page_id) throw new Error('page_id required');
       if (!Array.isArray(args.edits) || args.edits.length === 0) throw new Error('edits (non-empty array) required');
-      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       const previousState = extractPageState(page);
       let tree = parseElementorData(page.meta?._elementor_data);
 
@@ -3694,7 +3694,7 @@ async function executeTool(name, args, clientConfig = null) {
       }
 
       const position = args.position ?? 'end';
-      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`);
+      const page = await wpReq(`/wp/v2/pages/${args.page_id}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       const previousState = extractPageState(page);
       const tree = parseElementorData(page.meta?._elementor_data);
 
@@ -3732,9 +3732,9 @@ async function executeTool(name, args, clientConfig = null) {
       if (!draftId || !targetId) throw new Error('draft_id and target_id required');
       if (draftId === targetId) throw new Error('draft_id and target_id must differ');
 
-      const draft = await wpReq(`/wp/v2/pages/${draftId}?context=edit`);
+      const draft = await wpReq(`/wp/v2/pages/${draftId}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       if (!draft || !draft.id) throw new Error(`Draft page ${draftId} not found`);
-      const target = await wpReq(`/wp/v2/pages/${targetId}?context=edit`);
+      const target = await wpReq(`/wp/v2/pages/${targetId}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       if (!target || !target.id) throw new Error(`Target page ${targetId} not found`);
 
       const previousState = extractPageState(target);
@@ -3828,7 +3828,7 @@ async function executeTool(name, args, clientConfig = null) {
         throw new Error('post_id and non-empty find required');
       }
 
-      const page = await wpReq(`/wp/v2/pages/${postId}?context=edit`);
+      const page = await wpReq(`/wp/v2/pages/${postId}?context=edit`, { timeoutMs: HEAVY_FETCH_TIMEOUT_MS });
       if (!page || !page.id) throw new Error(`Page ${postId} not found`);
 
       const counter = { replacements: 0, fields: {} };
