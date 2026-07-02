@@ -22,6 +22,7 @@
 - **`wp_elementor_get_widget_settings`** מחזיר כעת `settings_readable` (ערכים שטוחים וקריאים) ו-`is_atomic` עבור אלמנטי V4.
 
 ### 🔧 Changed
+- **רגנרציית CSS אוטומטית בכל כתיבת `_elementor_data`** — `writeElementorData` (נקודת החנק שכל כלי הכתיבה של Elementor עוברים דרכה) קורא כעת ל-`regenerate-css` של מודול Strudel אחרי כתיבה מוצלחת, כך שהשינוי נראה בלי re-save ידני בעורך. best-effort ולא-זורק: באתרים בלי המודול זו no-op אחרי probe אחד ממוטמן (בלי בקשה נוספת). קריטי במיוחד בנתיב ה-fallback ל-core REST — שבניגוד ל-route המיוחס, לא מנקה מטמון בצד השרת. כל `wpReq` מתויג ב-`clientKey` כדי שה-probe יזהה נכון פר-לקוח בלי להשחיל פרמטר דרך כל callsite. אומת E2E מלא מול Elementor חי (תוסף 0.6.3, `method:post_css`).
 - ה-route `agency-os/v1/elementor-data` מטביע כעת `_elementor_version` ומנקה את מטמון ה-CSS (`files_manager->clear_cache`) אחרי כתיבה, כדי ש-CSS של atomic local-classes ייווצר מחדש. הכתיבה נשארת raw-meta (לא `Document::save`) כדי שאלמנטי V4 יישמרו byte-for-byte ולא יעברו סניטציה.
 
 ### 🔧 Fixed
