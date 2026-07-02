@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### ✨ Added
+- **הנחיות שרת (MCP `instructions`) — playbook לסוכן במקום קטלוג** — תגובת ה-`initialize` כוללת כעת מדריך-החלטות תמציתי שתמיד בקונטקסט של הסוכן: workflow עריכת Elementor (orient → locate by id → surgical edit → verify/rollback), מפת "איזה כלי לאיזו משימה", ואזהרה מפורשת מהאנטי-דפוס של הורדת-עמוד-שלם-ורישום-JSON-ידני. נועד למנוע את בעיית "פטיש אחד לכל מסמר" עם 120+ כלים. `serverInfo` עודכן (גרסה 3.2.0, ספירת כלים דינמית).
 - **פעולות מבנה כירורגיות על עץ ה-Elementor (pure-REST, ללא תלות בתוסף)** — חמישה כלים חדשים שמנצלים את ספריית ה-`elementor-tree.js` הקיימת, לעריכת מבנה עמוד בלי לבנות אותו מחדש. כולם מחזירים `previous_state` ל-rollback:
   - **`wp_elementor_find_widgets`** — איתור widgets בעמוד לפי `widget_type` / טקסט מוכל / התאמת `settings` — מחזיר ids, שרשרת אבות, ו-snippet. הזנה לכלים שפועלים לפי id.
   - **`wp_elementor_move_element`** — העברת אלמנט (widget/עמודה/section/container) למקום חדש בעמוד, תוך שמירת ה-id והילדים. חסום מהעברה לתוך תת-העץ של עצמו.
