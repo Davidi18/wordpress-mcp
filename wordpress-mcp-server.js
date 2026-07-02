@@ -447,7 +447,7 @@ const ELEMENTOR_MODULE_TTL_MS = 60000;
 const ELEMENTOR_MODULE_NEG_TTL_MS = 5000;
 const elementorModuleCache = new Map();
 
-async function probeElementorModule(wpReq, { clientKey = 'default', force = false } = {}) {
+async function probeElementorModule(wpReq, { clientKey = wpReq?.clientKey || 'default', force = false } = {}) {
   if (!force) {
     const hit = elementorModuleCache.get(clientKey);
     if (hit) {
@@ -481,7 +481,7 @@ function moduleFeatureOn(caps, feature) {
 // Best-effort CSS regeneration after an Elementor write. NEVER throws — a
 // missing module, inactive Elementor, or slow route degrades to a no-op with a
 // reason, so callers can attach the result without risking the underlying write.
-async function regenerateElementorCss(wpReq, postId, { scope = 'post', clientKey = 'default' } = {}) {
+async function regenerateElementorCss(wpReq, postId, { scope = 'post', clientKey = wpReq?.clientKey || 'default' } = {}) {
   const caps = await probeElementorModule(wpReq, { clientKey });
   if (!caps) return { regenerated: false, reason: 'module_absent' };
   if (!moduleFeatureOn(caps, 'regenerate_css')) {
@@ -584,6 +584,9 @@ async function wpRequest(endpoint, options = {}) {
 
   return data;
 }
+// Tag the default requester so module probes can key their cache by client
+// without threading a clientKey through every write callsite.
+wpRequest.clientKey = 'default';
 
 // Create wpRequest for specific client
 function createWpRequestForClient(clientConfig) {
@@ -591,7 +594,7 @@ function createWpRequestForClient(clientConfig) {
   const wpApiBase = baseURL.includes('/wp-json') ? baseURL : `${baseURL}/wp-json`;
   const authHeader = 'Basic ' + Buffer.from(`${clientConfig.username}:${clientConfig.password}`).toString('base64');
 
-  return async function(endpoint, options = {}) {
+  const clientReq = async function(endpoint, options = {}) {
     let url = `${wpApiBase}${endpoint}`;
 
     // WooCommerce endpoints use consumer key/secret authentication
@@ -630,6 +633,8 @@ function createWpRequestForClient(clientConfig) {
 
     return data;
   };
+  clientReq.clientKey = clientConfig?.name || 'default';
+  return clientReq;
 }
 
 // Extract a normalized, restore-able state object from a page fetched via
@@ -694,12 +699,13 @@ function statePayload(state) {
 // nothing breaks on sites that haven't installed the bridge.
 async function writeElementorData(wpReq, pageId, data) {
   const serialized = typeof data === 'string' ? data : JSON.stringify(data);
+  let result;
   try {
     const res = await wpReq('/agency-os/v1/elementor-data', {
       method: 'POST',
       body: { post_id: pageId, elementor_data: serialized }
     });
-    return { via: 'privileged', bytes: res?.bytes ?? serialized.length };
+    result = { via: 'privileged', bytes: res?.bytes ?? serialized.length };
   } catch (error) {
     // Only fall back when the route itself is absent (rest_no_route). A plain
     // 404 from the route means "post not found" — a real error we must surface,
@@ -710,10 +716,18 @@ async function writeElementorData(wpReq, pageId, data) {
         method: 'POST',
         body: { meta: { _elementor_data: serialized } }
       });
-      return { via: 'core', bytes: serialized.length };
+      result = { via: 'core', bytes: serialized.length };
+    } else {
+      throw error;
     }
-    throw error;
   }
+  // Regenerate Elementor's cached per-post CSS so the write actually shows
+  // without an editor re-save. Best-effort and never-throws: on sites without
+  // the Strudel Elementor module this returns a no-op reason after one cached
+  // probe (no extra request). Especially important on the `via:'core'` path,
+  // which — unlike the privileged route — does no cache clear server-side.
+  result.css = await regenerateElementorCss(wpReq, pageId);
+  return result;
 }
 
 // POST a page update, routing any `_elementor_data` in the payload through the
