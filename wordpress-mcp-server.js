@@ -6370,6 +6370,14 @@ const server = http.createServer(async (req, res) => {
       }));
     }
 
+    if (method === 'ping') {
+      return sendResult(JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        result: {}
+      }));
+    }
+
     if (method === 'tools/list') {
       return sendResult(JSON.stringify({
         jsonrpc: '2.0',
