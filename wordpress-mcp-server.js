@@ -2415,7 +2415,9 @@ const tools = [
       type: 'object',
       properties: {
         id: { type: 'number', description: 'Post/page/custom-post ID' },
-        post_type: { type: 'string', description: 'Content type or REST base, e.g. post, page, service', default: 'post' },
+        post_type: { type: 'string', description: 'WordPress content type, e.g. post, page, service', default: 'post' },
+        rest_base: { type: 'string', description: 'Optional explicit WordPress REST base when it differs from post_type; otherwise auto-discovered from /wp/v2/types' },
+        verify: { type: 'boolean', description: 'Read back and compare supplied fields after writing', default: true },
         title: { type: 'string', description: 'SEO title' },
         description: { type: 'string', description: 'Meta description' },
         focus_keyword: { type: 'string', description: 'Focus keyphrase' },
@@ -2435,7 +2437,8 @@ const tools = [
       type: 'object',
       properties: {
         id: { type: 'number', description: 'Post/page/custom-post ID' },
-        post_type: { type: 'string', description: 'Content type or REST base, e.g. post, page, service', default: 'post' }
+        post_type: { type: 'string', description: 'WordPress content type, e.g. post, page, service', default: 'post' },
+        rest_base: { type: 'string', description: 'Optional explicit WordPress REST base when it differs from post_type; otherwise auto-discovered from /wp/v2/types' }
       },
       required: ['id']
     }
@@ -4102,6 +4105,8 @@ async function executeTool(name, args, clientConfig = null) {
         wpReq,
         id: args.id,
         postType: args.post_type || 'post',
+        restBase: args.rest_base,
+        verify: args.verify !== false,
         title: args.title,
         description: args.description,
         focus_keyword: args.focus_keyword,
@@ -4117,7 +4122,8 @@ async function executeTool(name, args, clientConfig = null) {
       return await getYoastMeta({
         wpReq,
         id: args.id,
-        postType: args.post_type || 'post'
+        postType: args.post_type || 'post',
+        restBase: args.rest_base
       });
     }
 
@@ -4590,8 +4596,7 @@ async function executeTool(name, args, clientConfig = null) {
           postType: args.post_type,
           title: args.yoast_title,
           description: args.yoast_desc,
-          canonical: args.yoast_canonical,
-          touch: false
+          canonical: args.yoast_canonical
         });
       }
 

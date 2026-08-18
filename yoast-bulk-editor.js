@@ -5,12 +5,54 @@ const CORE_TYPES = new Map([
   ['pages', { contentType: 'page', restBase: 'pages' }]
 ]);
 
-export function normalizeYoastPostType(postType = 'post') {
-  const value = String(postType || 'post').trim().toLowerCase();
-  if (!/^[a-z0-9_-]+$/.test(value)) {
-    throw new Error(`Invalid Yoast post_type "${postType}".`);
+function validateTypeSlug(value, label) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!/^[a-z0-9_-]+$/.test(normalized)) {
+    throw new Error(`Invalid Yoast ${label} "${value}".`);
   }
+  return normalized;
+}
+
+export function normalizeYoastPostType(postType = 'post') {
+  const value = validateTypeSlug(postType || 'post', 'post_type');
   return CORE_TYPES.get(value) || { contentType: value, restBase: value };
+}
+
+export async function resolveYoastPostType({ wpReq, postType = 'post', restBase } = {}) {
+  const normalized = normalizeYoastPostType(postType);
+  if (restBase !== undefined) {
+    return {
+      contentType: normalized.contentType,
+      restBase: validateTypeSlug(restBase, 'rest_base'),
+      source: 'explicit'
+    };
+  }
+
+  if (CORE_TYPES.has(validateTypeSlug(postType || 'post', 'post_type'))) {
+    return { ...normalized, source: 'builtin' };
+  }
+
+  try {
+    const types = await wpReq('/wp/v2/types');
+    const requested = validateTypeSlug(postType, 'post_type');
+    for (const [key, value] of Object.entries(types || {})) {
+      try {
+        const contentType = validateTypeSlug(value?.slug || key, 'discovered post_type');
+        const discoveredRestBase = validateTypeSlug(value?.rest_base || contentType, 'discovered rest_base');
+        if (requested === key || requested === contentType || requested === discoveredRestBase) {
+          return { contentType, restBase: discoveredRestBase, source: 'wp_types' };
+        }
+      } catch {
+        // One malformed or non-standard type must not block discovery of all
+        // remaining types returned by WordPress or a plugin.
+      }
+    }
+  } catch {
+    // Some sites restrict the types endpoint. Preserve the historical
+    // same-slug behavior instead of blocking otherwise valid requests.
+  }
+
+  return { ...normalized, source: 'same_slug_fallback' };
 }
 
 function assertBulkResult(response, id, operation) {
@@ -24,8 +66,45 @@ function isMissingRouteError(error) {
   return /(?:rest_no_route|404|no route)/i.test(error?.message || '');
 }
 
-export async function updateYoastMeta({ wpReq, id, postType = 'post', touch = true, ...fields }) {
-  const { contentType, restBase } = normalizeYoastPostType(postType);
+function expectedFields(fields) {
+  const expected = {};
+  for (const key of [
+    'title',
+    'description',
+    'focus_keyword',
+    'robots_noindex',
+    'robots_nofollow',
+    'canonical',
+    'og_title',
+    'og_description'
+  ]) {
+    if (fields[key] !== undefined) expected[key] = fields[key];
+  }
+  return expected;
+}
+
+function compareReadback(expected, readback) {
+  const matched = [];
+  const mismatched = {};
+  for (const [field, value] of Object.entries(expected)) {
+    const actual = readback?.[field];
+    if (actual === value) matched.push(field);
+    else mismatched[field] = { expected: value, actual: actual ?? null };
+  }
+  return { matched, mismatched };
+}
+
+export async function updateYoastMeta({
+  wpReq,
+  id,
+  postType = 'post',
+  restBase,
+  touch = true,
+  verify = true,
+  ...fields
+}) {
+  const resolved = await resolveYoastPostType({ wpReq, postType, restBase });
+  const { contentType, restBase: resolvedRestBase } = resolved;
   const methods = [];
   const protectedMeta = {};
 
@@ -73,7 +152,7 @@ export async function updateYoastMeta({ wpReq, id, postType = 'post', touch = tr
   if (fields.robots_nofollow !== undefined) protectedMeta._yoast_wpseo_meta_robots_nofollow = fields.robots_nofollow ? '1' : '0';
   if (fields.canonical !== undefined) protectedMeta._yoast_wpseo_canonical = fields.canonical;
   if (Object.keys(protectedMeta).length > 0) {
-    await wpReq(`/wp/v2/${restBase}/${id}`, {
+    await wpReq(`/wp/v2/${resolvedRestBase}/${id}`, {
       method: 'POST',
       body: { meta: protectedMeta }
     });
@@ -85,10 +164,10 @@ export async function updateYoastMeta({ wpReq, id, postType = 'post', touch = tr
   }
 
   if (touch) {
-    const post = await wpReq(`/wp/v2/${restBase}/${id}?context=edit&_fields=id,title`);
+    const post = await wpReq(`/wp/v2/${resolvedRestBase}/${id}?context=edit&_fields=id,title`);
     const currentTitle = post?.title?.raw ?? post?.title?.rendered;
     if (currentTitle !== undefined) {
-      await wpReq(`/wp/v2/${restBase}/${id}`, {
+      await wpReq(`/wp/v2/${resolvedRestBase}/${id}`, {
         method: 'POST',
         body: { title: currentTitle }
       });
@@ -96,12 +175,50 @@ export async function updateYoastMeta({ wpReq, id, postType = 'post', touch = tr
     }
   }
 
-  return { updated: true, id: Number(id), post_type: contentType, methods };
+  const baseResult = {
+    updated: true,
+    id: Number(id),
+    post_type: contentType,
+    rest_base: resolvedRestBase,
+    type_resolution: resolved.source,
+    methods
+  };
+
+  if (!verify) {
+    return {
+      ...baseResult,
+      verified: null,
+      verification: { skipped: true }
+    };
+  }
+
+  try {
+    const readback = await getYoastMeta({
+      wpReq,
+      id,
+      postType: contentType,
+      restBase: resolvedRestBase
+    });
+    const verification = compareReadback(expectedFields(fields), readback);
+    return {
+      ...baseResult,
+      verified: Object.keys(verification.mismatched).length === 0,
+      verification,
+      readback
+    };
+  } catch (error) {
+    return {
+      ...baseResult,
+      verified: false,
+      verification: { matched: [], mismatched: {}, error: error.message }
+    };
+  }
 }
 
-export async function getYoastMeta({ wpReq, id, postType = 'post' }) {
-  const { contentType, restBase } = normalizeYoastPostType(postType);
-  const post = await wpReq(`/wp/v2/${restBase}/${id}?context=edit&_fields=id,title,yoast_head_json`);
+export async function getYoastMeta({ wpReq, id, postType = 'post', restBase } = {}) {
+  const resolved = await resolveYoastPostType({ wpReq, postType, restBase });
+  const { contentType, restBase: resolvedRestBase } = resolved;
+  const post = await wpReq(`/wp/v2/${resolvedRestBase}/${id}?context=edit&_fields=id,title,meta,yoast_head_json`);
   const postTitle = post?.title?.raw ?? post?.title?.rendered ?? '';
   const params = new URLSearchParams({
     content_type: contentType,
@@ -124,6 +241,8 @@ export async function getYoastMeta({ wpReq, id, postType = 'post' }) {
   return {
     id: Number(id),
     post_type: contentType,
+    rest_base: resolvedRestBase,
+    type_resolution: resolved.source,
     title: row?.seo_title || meta._yoast_wpseo_title || head.title || '',
     description: row?.meta_description || meta._yoast_wpseo_metadesc || head.description || '',
     focus_keyword: row?.focus_keyphrase || meta._yoast_wpseo_focuskw || '',
