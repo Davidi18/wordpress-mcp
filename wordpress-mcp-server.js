@@ -32,6 +32,7 @@ import {
   ATOMIC_CONTAINER_TYPES
 } from './elementor-atomic.js';
 import { ELEMENTOR_META_KEYS, SEO_META_KEYS, POST_NON_TAX_FIELDS } from './wp-meta-keys.js';
+import { getYoastMeta, updateYoastMeta } from './yoast-bulk-editor.js';
 import {
   requireApiKey,
   readBodyWithLimit,
@@ -2409,12 +2410,12 @@ const tools = [
   },
   {
     name: 'wp_yoast_update_meta',
-    description: 'Update Yoast SEO meta (title, description, focus keyword, robots) for a post/page. Works on sites with Yoast (smartup, xod).',
+    description: 'Update Yoast SEO metadata through Yoast Bulk Editor APIs for posts, pages, and public custom post types.',
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post/page ID' },
-        post_type: { type: 'string', description: 'post or page', default: 'post' },
+        id: { type: 'number', description: 'Post/page/custom-post ID' },
+        post_type: { type: 'string', description: 'Content type or REST base, e.g. post, page, service', default: 'post' },
         title: { type: 'string', description: 'SEO title' },
         description: { type: 'string', description: 'Meta description' },
         focus_keyword: { type: 'string', description: 'Focus keyphrase' },
@@ -2429,12 +2430,12 @@ const tools = [
   },
   {
     name: 'wp_yoast_get_meta',
-    description: 'Get Yoast SEO meta fields (title, description, focus keyword, robots, canonical) for a specific post/page by ID.',
+    description: 'Get stored Yoast metadata for a post, page, or public custom post type by ID.',
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post/page ID' },
-        post_type: { type: 'string', description: 'post or page', default: 'post' }
+        id: { type: 'number', description: 'Post/page/custom-post ID' },
+        post_type: { type: 'string', description: 'Content type or REST base, e.g. post, page, service', default: 'post' }
       },
       required: ['id']
     }
@@ -4097,63 +4098,27 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_yoast_update_meta': {
-      // Yoast doesn't register meta in REST API by default.
-      // Strategy: try meta object first (works if Yoast REST is enabled),
-      // fall back to yoast_head_json check for verification.
-      const yMeta = {};
-      if (args.title !== undefined) yMeta._yoast_wpseo_title = args.title;
-      if (args.description !== undefined) yMeta._yoast_wpseo_metadesc = args.description;
-      if (args.focus_keyword !== undefined) yMeta._yoast_wpseo_focuskw = args.focus_keyword;
-      if (args.robots_noindex !== undefined) yMeta._yoast_wpseo_meta_robots_noindex = args.robots_noindex ? '1' : '0';
-      if (args.robots_nofollow !== undefined) yMeta._yoast_wpseo_meta_robots_nofollow = args.robots_nofollow ? '1' : '0';
-      if (args.canonical !== undefined) yMeta._yoast_wpseo_canonical = args.canonical;
-      if (args.og_title !== undefined) yMeta._yoast_wpseo_opengraph_title = args.og_title;
-      if (args.og_description !== undefined) yMeta._yoast_wpseo_opengraph_description = args.og_description;
-      const yEndpoint = args.post_type === 'page' ? 'pages' : 'posts';
-      try {
-        await wpReq(`/wp/v2/${yEndpoint}/${args.id}`, {
-          method: 'POST',
-          body: { meta: yMeta }
-        });
-        return { updated: true, id: args.id, fields: Object.keys(yMeta), method: 'meta' };
-      } catch (e) {
-        // If meta write fails (Yoast doesn't register fields), try yoast_meta endpoint
-        if (e.message?.includes('404') || e.message?.includes('rest_no_route')) {
-          // Fall back: update via standard post update with meta in body
-          // Some Yoast versions expose meta through yoast_head_json but not write
-          return {
-            updated: false,
-            error: 'Yoast does not expose meta write via REST API on this site. Use wp_update_post with meta fields directly, or install "Yoast SEO: REST API" addon.',
-            id: args.id,
-            workaround: `wp_update_post id:${args.id} meta:'${JSON.stringify(yMeta)}'`
-          };
-        }
-        throw e;
-      }
+      return await updateYoastMeta({
+        wpReq,
+        id: args.id,
+        postType: args.post_type || 'post',
+        title: args.title,
+        description: args.description,
+        focus_keyword: args.focus_keyword,
+        robots_noindex: args.robots_noindex,
+        robots_nofollow: args.robots_nofollow,
+        canonical: args.canonical,
+        og_title: args.og_title,
+        og_description: args.og_description
+      });
     }
 
     case 'wp_yoast_get_meta': {
-      const yEndpoint2 = args.post_type === 'page' ? 'pages' : 'posts';
-      const yPost = await wpReq(`/wp/v2/${yEndpoint2}/${args.id}?context=edit`);
-      const yM = yPost?.meta || {};
-      // Also try yoast_head_json (Yoast v14+ adds this to REST response)
-      const yHead = yPost?.yoast_head_json || {};
-      return {
+      return await getYoastMeta({
+        wpReq,
         id: args.id,
-        // Prefer direct meta, fall back to yoast_head_json
-        title: yM._yoast_wpseo_title || yHead.title || '',
-        description: yM._yoast_wpseo_metadesc || yHead.description || '',
-        focus_keyword: yM._yoast_wpseo_focuskw || '',
-        robots_noindex: yM._yoast_wpseo_meta_robots_noindex === '1',
-        robots_nofollow: yM._yoast_wpseo_meta_robots_nofollow === '1',
-        canonical: yM._yoast_wpseo_canonical || yHead.canonical || '',
-        og_title: yM._yoast_wpseo_opengraph_title || yHead.og_title || '',
-        og_description: yM._yoast_wpseo_opengraph_description || yHead.og_description || '',
-        og_image: yHead.og_image?.[0]?.url || '',
-        schema_page_type: yM._yoast_wpseo_schema_page_type || '',
-        schema_article_type: yM._yoast_wpseo_schema_article_type || '',
-        source: Object.keys(yM).some(k => k.includes('yoast')) ? 'meta' : 'yoast_head_json'
-      };
+        postType: args.post_type || 'post'
+      });
     }
 
     // ── SETTINGS ──
@@ -4611,19 +4576,25 @@ async function executeTool(name, args, clientConfig = null) {
       if (args.status !== undefined) postData.status = args.status;
       if (args.excerpt !== undefined) postData.excerpt = args.excerpt;
       if (args.meta !== undefined) postData.meta = args.meta;
-      // Yoast SEO shorthand
-      if (args.yoast_title !== undefined || args.yoast_desc !== undefined || args.yoast_canonical !== undefined) {
-        postData.meta = postData.meta || {};
-        if (args.yoast_title !== undefined) postData.meta['yoast_wpseo_title'] = args.yoast_title;
-        if (args.yoast_desc !== undefined) postData.meta['yoast_wpseo_metadesc'] = args.yoast_desc;
-        if (args.yoast_canonical !== undefined) postData.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
-      }
-      
+
       const post = await wpReq(`/wp/v2/${args.post_type}/${args.id}`, {
         method: 'POST',
         body: JSON.stringify(postData)
       });
-      
+
+      let yoastUpdate = null;
+      if (args.yoast_title !== undefined || args.yoast_desc !== undefined || args.yoast_canonical !== undefined) {
+        yoastUpdate = await updateYoastMeta({
+          wpReq,
+          id: args.id,
+          postType: args.post_type,
+          title: args.yoast_title,
+          description: args.yoast_desc,
+          canonical: args.yoast_canonical,
+          touch: false
+        });
+      }
+
       return { 
         id: post.id, 
         title: post.title?.rendered,
@@ -4631,7 +4602,8 @@ async function executeTool(name, args, clientConfig = null) {
         status: post.status,
         slug: post.slug,
         modified: post.modified,
-        meta: post.meta
+        meta: post.meta,
+        yoast_update: yoastUpdate
       };
     }
 
