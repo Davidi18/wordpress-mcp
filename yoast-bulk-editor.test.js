@@ -218,6 +218,77 @@ test('reports verified false when WordPress accepts but does not persist a fallb
   });
 });
 
+test('preserves intentionally empty raw values during verification', async () => {
+  const wpReq = async (endpoint) => {
+    if (endpoint === '/yoast/v1/bulk_editor/update_social') {
+      return { results: [{ id: 88, success: true }] };
+    }
+    if (endpoint === '/wp/v2/pages/88') return { id: 88 };
+    if (endpoint === '/wp/v2/pages/88?context=edit&_fields=id,title') {
+      return { id: 88, title: { raw: 'Page title' } };
+    }
+    if (endpoint === '/wp/v2/pages/88?context=edit&_fields=id,title,meta,yoast_head_json') {
+      return {
+        id: 88,
+        title: { raw: 'Page title' },
+        meta: { _yoast_wpseo_canonical: '' },
+        yoast_head_json: {
+          canonical: 'https://example.com/page/',
+          og_title: 'Effective fallback title'
+        }
+      };
+    }
+    if (endpoint.startsWith('/yoast/v1/bulk_editor/posts?')) {
+      return {
+        posts: [{
+          id: 88,
+          seo_title: 'SEO title',
+          meta_description: '',
+          focus_keyphrase: '',
+          social_title: '',
+          social_description: ''
+        }]
+      };
+    }
+    throw new Error(`Unexpected endpoint ${endpoint}`);
+  };
+
+  const result = await updateYoastMeta({
+    wpReq,
+    id: 88,
+    postType: 'page',
+    og_title: '',
+    canonical: ''
+  });
+
+  assert.equal(result.readback.og_title, 'Effective fallback title');
+  assert.equal(result.readback.canonical, 'https://example.com/page/');
+  assert.equal(result.readback.raw.og_title, '');
+  assert.equal(result.readback.raw.canonical, '');
+  assert.equal(result.verified, true);
+  assert.deepEqual(result.verification.matched, ['canonical', 'og_title']);
+});
+
+test('falls back to direct data when Bulk Editor omits the requested post', async () => {
+  const wpReq = async endpoint => {
+    if (endpoint === '/wp/v2/posts/99?context=edit&_fields=id,title,meta,yoast_head_json') {
+      return {
+        id: 99,
+        title: { raw: '' },
+        meta: { _yoast_wpseo_title: 'Direct stored title', _yoast_wpseo_focuskw: 'direct keyphrase' },
+        yoast_head_json: { title: 'Rendered fallback title' }
+      };
+    }
+    if (endpoint.startsWith('/yoast/v1/bulk_editor/posts?')) return { posts: [] };
+    throw new Error(`Unexpected endpoint ${endpoint}`);
+  };
+
+  const result = await getYoastMeta({ wpReq, id: 99, postType: 'post' });
+  assert.equal(result.title, 'Direct stored title');
+  assert.equal(result.focus_keyword, 'direct keyphrase');
+  assert.equal(result.source, 'meta');
+});
+
 test('reads service metadata from Yoast Bulk Editor by post id', async () => {
   const wpReq = async endpoint => {
     if (endpoint.startsWith('/wp/v2/service/4027')) {

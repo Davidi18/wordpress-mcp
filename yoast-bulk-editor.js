@@ -86,8 +86,11 @@ function expectedFields(fields) {
 function compareReadback(expected, readback) {
   const matched = [];
   const mismatched = {};
+  const raw = readback?.raw || {};
   for (const [field, value] of Object.entries(expected)) {
-    const actual = readback?.[field];
+    const actual = Object.prototype.hasOwnProperty.call(raw, field) && raw[field] !== undefined
+      ? raw[field]
+      : readback?.[field];
     if (actual === value) matched.push(field);
     else mismatched[field] = { expected: value, actual: actual ?? null };
   }
@@ -228,16 +231,32 @@ export async function getYoastMeta({ wpReq, id, postType = 'post', restBase } = 
   let row = null;
   try {
     const response = await wpReq(`/yoast/v1/bulk_editor/posts?${params.toString()}`);
-    row = response?.posts?.find(item => Number(item?.id) === Number(id));
-    if (!row) {
-      throw new Error(`Yoast Bulk Editor readback did not return ${contentType} ${id}.`);
-    }
+    row = response?.posts?.find(item => Number(item?.id) === Number(id)) || null;
   } catch (error) {
     if (!isMissingRouteError(error)) throw error;
   }
 
   const meta = post?.meta || {};
   const head = post?.yoast_head_json || {};
+  const hasOwn = (object, key) => object != null && Object.prototype.hasOwnProperty.call(object, key);
+  const raw = {
+    title: hasOwn(row, 'seo_title') ? row.seo_title : (hasOwn(meta, '_yoast_wpseo_title') ? meta._yoast_wpseo_title : undefined),
+    description: hasOwn(row, 'meta_description') ? row.meta_description : (hasOwn(meta, '_yoast_wpseo_metadesc') ? meta._yoast_wpseo_metadesc : undefined),
+    focus_keyword: hasOwn(row, 'focus_keyphrase') ? row.focus_keyphrase : (hasOwn(meta, '_yoast_wpseo_focuskw') ? meta._yoast_wpseo_focuskw : undefined),
+    robots_noindex: hasOwn(meta, '_yoast_wpseo_meta_robots_noindex')
+      ? meta._yoast_wpseo_meta_robots_noindex === '1'
+      : (head?.robots?.index ? head.robots.index === 'noindex' : undefined),
+    robots_nofollow: hasOwn(meta, '_yoast_wpseo_meta_robots_nofollow')
+      ? meta._yoast_wpseo_meta_robots_nofollow === '1'
+      : (head?.robots?.follow ? head.robots.follow === 'nofollow' : undefined),
+    canonical: hasOwn(meta, '_yoast_wpseo_canonical') ? meta._yoast_wpseo_canonical : undefined,
+    og_title: hasOwn(row, 'social_title')
+      ? row.social_title
+      : (hasOwn(meta, '_yoast_wpseo_opengraph-title') ? meta['_yoast_wpseo_opengraph-title'] : undefined),
+    og_description: hasOwn(row, 'social_description')
+      ? row.social_description
+      : (hasOwn(meta, '_yoast_wpseo_opengraph-description') ? meta['_yoast_wpseo_opengraph-description'] : undefined)
+  };
   return {
     id: Number(id),
     post_type: contentType,
@@ -252,6 +271,7 @@ export async function getYoastMeta({ wpReq, id, postType = 'post', restBase } = 
     og_title: row?.social_title || meta['_yoast_wpseo_opengraph-title'] || head.og_title || row?.seo_title || '',
     og_description: row?.social_description || meta['_yoast_wpseo_opengraph-description'] || head.og_description || row?.meta_description || '',
     og_image: head.og_image?.[0]?.url || '',
+    raw,
     source: row ? 'yoast_bulk_editor' : (Object.keys(meta).some(key => key.includes('yoast')) ? 'meta' : 'yoast_head_json')
   };
 }
