@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+### 🧹 Removed
+- **קוד מת** — `aggregator.js`, `analytics-logger.js`, `cache-manager.js`, `rate-limiter.js`, `wp-dynamic-proxy.js`, `wp-mcp-wrapper.js` (כ-2,200 שורות משכבת ה-Hub הישנה). אף אחד מהם לא נטען ע"י `wordpress-mcp-server.js` או ה-Dockerfile.
+
+### 🔧 CI
+- GitHub Action (`.github/workflows/test.yml`) — בדיקת syntax + `npm test` על כל PR ועל main.
+
 ### ✨ Added
 - **קריאת ACF / meta / טקסונומיות** — פרמטר `include: ["acf","meta","taxonomies"]` ב-`wp_get_post` / `wp_get_page` / `wp_get_custom_post` (+ `acf_format: light|standard`). מאפשר לסוכן לקרוא ערכים קיימים לפני שדורסים אותם. בלי `include` — הפלט זהה לקודם. אם אין `acf` ב-REST מוחזר `acf: null` עם הסבר.
 
