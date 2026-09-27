@@ -6,6 +6,17 @@
 
 ## [Unreleased]
 
+### 🔒 Security
+- **הוסרה ברירת מחדל קשיחה של `DATABASE_URL`** (IP + סיסמה בקוד). בלי המשתנה — השרת עובר ל-ENV fallback. **לפני deploy: לוודא ש-`DATABASE_URL` מוגדר בסביבה.**
+
+### ✨ Added
+- **Toolsets** — `/mcp?toolsets=content,seo` (או `MCP_TOOLSETS`) מצמצם את `tools/list` לקבוצות: core, content, seo, woo, elementor, admin. ברירת מחדל: הכל. `tools/call` לא מסונן. נועד למארחים שחותכים רשימות כלים ארוכות. מודול `toolsets.js` + בדיקות.
+
+### 🐛 Fixed
+- **`wp_rankmath_update_meta`** — מאמת את ה-meta שחזר מ-WordPress; זורק שגיאה אם מפתח לא נשמר (למשל meta שלא רשום ל-REST) במקום `updated: true` כוזב.
+- גרסת `package.json` סונכרנה ל-3.2.0.
+- `wp_elementor_add_atomic` מסומן legacy — להעדיף את ה-Elementor MCP הרשמי ל-V4 כשהוא מחובר.
+
 ### ✨ Added
 - **כתיבת ACF מאומתת (`acf`)** — פרמטר `acf` חדש ב-`wp_update_post` / `wp_update_page` / `wp_update_custom_post`, ו-`updates.acf` מתועד ב-`wp_bulk_update_posts`. מודול חדש `acf-writer.js`: preflight שמוודא שהפוסט חושף `acf` ב-REST ושכל שם שדה קיים (אחרת לא נכתב כלום ומוחזרת שגיאה ברורה), כתיבה תחת המפתח `acf` (לא `meta`), וקריאה חוזרת שמשווה ערכים — אין יותר "הצלחה" על 200 שבו ACF בלע את הכתיבה בשקט. עדכון חלקי; `""`/`null` מנקים שדה. field keys (`field_xxx`) מועברים ומסומנים `unverified`. בדיקות: `acf-writer.test.js`.
 

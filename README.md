@@ -93,6 +93,25 @@
 
 ---
 
+## 🧰 Toolsets (limit tools per connector)
+
+The server exposes 120+ tools. Some MCP hosts truncate long tool lists, so an agent can silently lose tools. Pick only what a connector needs via the URL:
+
+```
+https://your-mcp-host/mcp?toolsets=content,seo
+```
+
+| Toolset | Tools |
+|---|---|
+| `core` (always on) | clients, site info |
+| `content` | posts, pages, CPT, media, comments, taxonomies, menus, search, bulk update, ACF |
+| `seo` | RankMath, Yoast, redirects |
+| `woo` | WooCommerce `wc_*` |
+| `elementor` | `wp_elementor_*`, page state/rollback, replace text |
+| `admin` | plugins, code snippets, file API |
+
+No `toolsets` → all tools (default). `MCP_TOOLSETS` sets a server-wide default. Filtering only affects `tools/list`; calling a hidden tool by name still works. Unknown toolset names return an error.
+
 ## 📊 Complete Endpoint Coverage
 
 ### Posts (5 endpoints)
