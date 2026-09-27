@@ -7,6 +7,13 @@
 ## [Unreleased]
 
 ### ✨ Added
+- **כתיבת ACF מאומתת (`acf`)** — פרמטר `acf` חדש ב-`wp_update_post` / `wp_update_page` / `wp_update_custom_post`, ו-`updates.acf` מתועד ב-`wp_bulk_update_posts`. מודול חדש `acf-writer.js`: preflight שמוודא שהפוסט חושף `acf` ב-REST ושכל שם שדה קיים (אחרת לא נכתב כלום ומוחזרת שגיאה ברורה), כתיבה תחת המפתח `acf` (לא `meta`), וקריאה חוזרת שמשווה ערכים — אין יותר "הצלחה" על 200 שבו ACF בלע את הכתיבה בשקט. עדכון חלקי; `""`/`null` מנקים שדה. field keys (`field_xxx`) מועברים ומסומנים `unverified`. בדיקות: `acf-writer.test.js`.
+
+### 🐛 Fixed
+- **`wp_bulk_update_posts`** — תומך ב-`post_ids` כ-alias ל-`ids` (קודם קרס), ב-CPT דרך גילוי rest_base, ומחזיר תוצאה מפורטת לכל פוסט. תוקן שימוש ב-`args.ids.length` כשה-ids הגיעו כמחרוזת JSON.
+- **סכמת `wp_update_post` / `wp_update_page`** — חשיפת `meta` שה-handler כבר תמך בו אבל לא הופיע בסכמה.
+
+### ✨ Added
 - **הנחיות שרת (MCP `instructions`) — playbook לסוכן במקום קטלוג** — תגובת ה-`initialize` כוללת כעת מדריך-החלטות תמציתי שתמיד בקונטקסט של הסוכן: workflow עריכת Elementor (orient → locate by id → surgical edit → verify/rollback), מפת "איזה כלי לאיזו משימה", ואזהרה מפורשת מהאנטי-דפוס של הורדת-עמוד-שלם-ורישום-JSON-ידני. נועד למנוע את בעיית "פטיש אחד לכל מסמר" עם 120+ כלים. `serverInfo` עודכן (גרסה 3.2.0, ספירת כלים דינמית).
 - **פעולות מבנה כירורגיות על עץ ה-Elementor (pure-REST, ללא תלות בתוסף)** — חמישה כלים חדשים שמנצלים את ספריית ה-`elementor-tree.js` הקיימת, לעריכת מבנה עמוד בלי לבנות אותו מחדש. כולם מחזירים `previous_state` ל-rollback:
   - **`wp_elementor_find_widgets`** — איתור widgets בעמוד לפי `widget_type` / טקסט מוכל / התאמת `settings` — מחזיר ids, שרשרת אבות, ו-snippet. הזנה לכלים שפועלים לפי id.

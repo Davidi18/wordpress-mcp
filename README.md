@@ -99,7 +99,7 @@
 - `wp_get_posts` - List posts with filters
 - `wp_get_post` - Get single post
 - `wp_create_post` - Create new post
-- `wp_update_post` - Update existing post
+- `wp_update_post` - Update existing post (supports `acf: { field_name: value }` — verified ACF write)
 - `wp_delete_post` - Delete post
 
 ### Pages (5 endpoints)
