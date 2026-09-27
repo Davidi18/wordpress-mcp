@@ -35,6 +35,7 @@ import { ELEMENTOR_META_KEYS, SEO_META_KEYS, POST_NON_TAX_FIELDS } from './wp-me
 import { getYoastMeta, updateYoastMeta, resolveYoastPostType } from './yoast-bulk-editor.js';
 import { updatePostWithAcf, acfFailureMessage } from './acf-writer.js';
 import { parseToolsets, filterTools } from './toolsets.js';
+import { createAuditLog } from './audit-log.js';
 import {
   requireApiKey,
   readBodyWithLimit,
@@ -85,6 +86,10 @@ async function initDatabase() {
     return null;
   }
 }
+
+// Durable log of every write tool call (table mcp_audit_log). Needs DATABASE_URL;
+// MCP_AUDIT_LOG=off disables it. Never blocks or fails a tool call.
+const auditLog = createAuditLog({ getDb: initDatabase, enabled: process.env.MCP_AUDIT_LOG !== 'off' });
 
 // Load clients from PostgreSQL
 async function loadClientsFromDB() {
@@ -579,8 +584,12 @@ function isSafeRoutingMethod(method) {
   return method === 'initialize' || method === 'tools/list' || (method && method.startsWith('notifications/'));
 }
 
-async function requireExplicitClientRouting(args, method) {
+// Tools that never touch a WordPress site, so they need no client routing.
+const SITE_INDEPENDENT_TOOLS = new Set(['wp_audit_log']);
+
+async function requireExplicitClientRouting(args, method, toolName) {
   if (isSafeRoutingMethod(method)) return;
+  if (SITE_INDEPENDENT_TOOLS.has(toolName)) return;
   if (args && (args.client || args.site_url)) return;
 
   const clients = await getAllClientConfigs();
@@ -2344,6 +2353,23 @@ const tools = [
     }
   },
 
+  // ── AUDIT LOG ──
+  {
+    name: 'wp_audit_log',
+    description: 'Query the log of write operations made through this server (every create/update/delete/install tool call, success or failure). Answers "what changed on this site / this post, when, and what was there before" — previous_state holds rollback data when the tool captured it (Elementor/page-state tools, ACF writes). Needs no client routing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filter_client: { type: 'string', description: 'Filter by client name (partial match)' },
+        tool: { type: 'string', description: 'Exact tool name, e.g. wp_update_post' },
+        target_id: { type: 'string', description: 'Post/page/product ID the write targeted' },
+        since: { type: 'string', description: 'ISO timestamp, e.g. 2026-09-27T00:00:00Z' },
+        failed_only: { type: 'boolean', description: 'Only failed writes' },
+        limit: { type: 'number', description: 'Max rows (1-200)', default: 50 }
+      }
+    }
+  },
+
   // ── BULK OPERATIONS ──
   {
     name: 'wp_bulk_update_posts',
@@ -2529,6 +2555,8 @@ ELEMENTOR EDITING — follow this workflow instead of hand-editing page JSON:
 5. SAFETY: every mutating Elementor tool returns \`previous_state\` and verifies the written byte length. To undo, pass that state to wp_restore_page_state. Elementor CSS is regenerated automatically after each write (via the Strudel module when present) — no manual regeneration step needed.
 
 ACF FIELDS: read current values first with wp_get_post / wp_get_page / wp_get_custom_post and include: ["acf"]. Write them with the \`acf\` argument of wp_update_post / wp_update_page / wp_update_custom_post, or \`updates.acf\` in wp_bulk_update_posts (many posts). Never write ACF fields through \`meta\` — it can return 200 without changing the ACF value. ACF writes are read back and fail loudly if not stored.
+
+HISTORY: every write through this server is logged. To see what changed on a site or post (and the previous values), call wp_audit_log — it needs no client argument.
 
 Anti-pattern to avoid: fetching a whole page and re-writing _elementor_data for a change a surgical tool already covers. The surgical tools preserve element ids, are cheaper, roll back, and self-verify.`;
 
@@ -4057,6 +4085,19 @@ async function executeTool(name, args, clientConfig = null) {
         type: r.type,
         subtype: r.subtype
       }));
+    }
+
+    // ── AUDIT LOG ──
+    case 'wp_audit_log': {
+      const rows = await auditLog.query({
+        client: args.filter_client,
+        tool: args.tool,
+        target_id: args.target_id,
+        since: args.since,
+        failed_only: args.failed_only,
+        limit: args.limit
+      });
+      return { count: rows.length, entries: rows };
     }
 
     // ── BULK OPERATIONS ──
@@ -6456,7 +6497,7 @@ const server = http.createServer(async (req, res) => {
         delete args.arguments;
       }
 
-      await requireExplicitClientRouting(args, method);
+      await requireExplicitClientRouting(args, method, name);
 
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('🪵 TOOL CALL:', name);
@@ -6490,7 +6531,22 @@ const server = http.createServer(async (req, res) => {
         if (args.type && !args.post_type) args.post_type = args.type;
       }
 
-      const result = await executeTool(name, args || {}, clientConfig);
+      const startedAt = Date.now();
+      const auditBase = {
+        tool: name,
+        client: clientConfig?.name ?? initConfig.name ?? 'default',
+        site: clientConfig?.url ?? initConfig.url ?? null,
+        user_agent: req.headers['user-agent'],
+        args
+      };
+      let result;
+      try {
+        result = await executeTool(name, args || {}, clientConfig);
+      } catch (toolError) {
+        auditLog.record({ ...auditBase, error: toolError.message, duration_ms: Date.now() - startedAt });
+        throw toolError;
+      }
+      auditLog.record({ ...auditBase, result, duration_ms: Date.now() - startedAt });
 
       return sendResult(JSON.stringify({
         jsonrpc: '2.0',

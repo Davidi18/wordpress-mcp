@@ -24,7 +24,7 @@ const ADMIN = new Set([
   'wp_bootstrap_plugin_installer'
 ]);
 
-const CORE = new Set(['wp_list_clients', 'wp_refresh_clients', 'wp_get_site_info']);
+const CORE = new Set(['wp_list_clients', 'wp_refresh_clients', 'wp_get_site_info', 'wp_audit_log']);
 
 export function toolsetOf(name) {
   if (CORE.has(name)) return 'core';

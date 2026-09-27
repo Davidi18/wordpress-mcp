@@ -6,6 +6,9 @@
 
 ## [Unreleased]
 
+### ✨ Added
+- **Audit log** — כל קריאה לכלי כתיבה (create/update/delete/install; קריאות לא) נרשמת בטבלה `mcp_audit_log` ב-PostgreSQL: זמן, לקוח, אתר, כלי, מזהה יעד, הצלחה/שגיאה, משך, user-agent, ה-args (סודות מוסתרים), התוצאה, ו-`previous_state` כשהכלי לכד אותו (כלי Elementor/page-state; כתיבת ACF שומרת את הערכים הקודמים של השדות ששונו). כלי חדש `wp_audit_log` (toolset `core`, לא דורש `client`) לשאילתות. הלוג לעולם לא חוסם או מכשיל קריאה; בלי `DATABASE_URL` — no-op; `MCP_AUDIT_LOG=off` מכבה. הטבלה נוצרת אוטומטית; אם לתפקיד אין הרשאת CREATE — backoff של 5 דקות ושגיאה אחת בלוג במקום בכל כתיבה.
+
 ### 🧹 Removed
 - **קוד מת** — `aggregator.js`, `analytics-logger.js`, `cache-manager.js`, `rate-limiter.js`, `wp-dynamic-proxy.js`, `wp-mcp-wrapper.js` (כ-1,500 שורות משכבת ה-Hub הישנה). אף אחד מהם לא נטען ע"י `wordpress-mcp-server.js` או ה-Dockerfile.
 
