@@ -32,6 +32,7 @@ test('writes four FAQ pairs, sends them under `acf` (not meta), and verifies the
   assert.deepEqual(calls[1].options.body, { acf });
   assert.equal(calls[1].options.body.meta, undefined);
   assert.equal('pm_other' in calls[1].options.body.acf, false, 'unsent fields are not touched');
+  assert.deepEqual(result.previous, Object.fromEntries(Object.keys(acf).map(k => [k, ''])));
 });
 
 test('refuses to write when the post has no REST acf field', async () => {

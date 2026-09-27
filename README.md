@@ -112,6 +112,29 @@ https://your-mcp-host/mcp?toolsets=content,seo
 
 No `toolsets` → all tools (default). `MCP_TOOLSETS` sets a server-wide default. Filtering only affects `tools/list`; calling a hidden tool by name still works. Unknown toolset names return an error.
 
+## 📜 Audit log (every write, with rollback data)
+
+Every write tool call (create / update / delete / install — reads are skipped) is recorded in the `mcp_audit_log` table in the same PostgreSQL as the client list (`DATABASE_URL`). Each row has: time, client, site, tool, target ID, success/error, duration, user agent, the arguments (secrets redacted), the result, and `previous_state` when the tool captured one (Elementor/page-state tools; ACF writes store the previous values of the fields they changed).
+
+- Query it with the `wp_audit_log` tool (in the `core` toolset, needs no `client`): filter by `filter_client`, `tool`, `target_id`, `since`, `failed_only`.
+- Logging never blocks or fails a tool call. Without `DATABASE_URL` it is a no-op. `MCP_AUDIT_LOG=off` disables it.
+- The table is created automatically. If the DB role can't `CREATE`, create it once as an owner:
+
+```sql
+CREATE TABLE IF NOT EXISTS mcp_audit_log (
+  id BIGSERIAL PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  client TEXT, site TEXT, tool TEXT NOT NULL, target_id TEXT, post_type TEXT,
+  success BOOLEAN NOT NULL, error TEXT, duration_ms INTEGER, user_agent TEXT,
+  args JSONB, result JSONB, previous_state JSONB
+);
+CREATE INDEX IF NOT EXISTS mcp_audit_log_client_time ON mcp_audit_log (client, created_at DESC);
+CREATE INDEX IF NOT EXISTS mcp_audit_log_target ON mcp_audit_log (target_id);
+GRANT SELECT, INSERT, DELETE ON mcp_audit_log TO <mcp_role>;
+GRANT USAGE ON SEQUENCE mcp_audit_log_id_seq TO <mcp_role>;
+```
+
+- Retention: entries older than 90 days are deleted automatically (at startup and daily). Change with `MCP_AUDIT_RETENTION_DAYS`; `0` keeps everything. The DB role needs `DELETE` on the table for this.
+
 ## 📊 Complete Endpoint Coverage
 
 ### Posts (5 endpoints)

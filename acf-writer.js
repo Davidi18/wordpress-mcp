@@ -100,9 +100,15 @@ export async function updatePostWithAcf({ wpReq, restBase, id, acf, body = {} })
     );
   }
 
+  // Values before the write, for the requested fields only — already fetched
+  // by the preflight, so the audit log gets a rollback point for free.
+  const previous = Object.fromEntries(
+    Object.keys(requested).filter(f => !isFieldKey(f)).map(f => [f, currentAcf[f]])
+  );
+
   const post = await wpReq(path, { method: 'POST', body: { ...body, acf: requested } });
   const verification = verifyAcfWrite(requested, post?.acf);
-  return { post, acf: verification };
+  return { post, acf: { ...verification, previous } };
 }
 
 export function acfFailureMessage(restBase, id, verification) {
