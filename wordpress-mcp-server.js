@@ -34,6 +34,7 @@ import {
 import { ELEMENTOR_META_KEYS, SEO_META_KEYS, POST_NON_TAX_FIELDS } from './wp-meta-keys.js';
 import { getYoastMeta, updateYoastMeta, resolveYoastPostType } from './yoast-bulk-editor.js';
 import { updatePostWithAcf, acfFailureMessage } from './acf-writer.js';
+import { parseToolsets, filterTools } from './toolsets.js';
 import {
   requireApiKey,
   readBodyWithLimit,
@@ -49,7 +50,8 @@ const PORT = parseInt(process.env.PORT || '8080');
 const API_KEY = process.env.API_KEY;
 
 // PostgreSQL Configuration (Agency OS via Tailscale)
-const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:password@100.98.146.89:5432/postgres';
+// No hardcoded fallback: credentials must come from the environment.
+const DATABASE_URL = process.env.DATABASE_URL || null;
 
 // Client cache (refreshes every 5 minutes)
 let clientCache = null;
@@ -61,7 +63,8 @@ let pgClient = null;
 
 async function initDatabase() {
   if (pgClient) return pgClient;
-  
+  if (!DATABASE_URL) return null;
+
   try {
     const { Pool } = pg;
     pgClient = new Pool({
@@ -2194,7 +2197,7 @@ const tools = [
   },
   {
     name: 'wp_elementor_add_atomic',
-    description: 'Add an Elementor 4.0 "atomic" (V4) element to a page using flat, AI-friendly params — no need to hand-write the $$type-wrapped JSON the atomic engine requires. Builds e-flexbox/e-div-block containers (with layout styles applied as a local style class) and atomic widgets (e-heading, e-paragraph, e-button, e-image, e-svg, e-youtube, e-self-hosted-video, e-divider). IMPORTANT: atomic elements only persist on sites where the atomic experiment is active — call wp_elementor_capabilities first (the `atomic` field) or rely on this tool\'s built-in pre-check (run wp_bootstrap_elementor_writer once so the check is authoritative). To nest widgets inside a container, add the container first, then add children with position:{ parent_id: <returned element_id> }.',
+    description: 'Legacy/frozen: if the official Elementor MCP is connected (Elementor >= 4.3), prefer it for V4 atomic building. Add an Elementor 4.0 "atomic" (V4) element to a page using flat, AI-friendly params — no need to hand-write the $$type-wrapped JSON the atomic engine requires. Builds e-flexbox/e-div-block containers (with layout styles applied as a local style class) and atomic widgets (e-heading, e-paragraph, e-button, e-image, e-svg, e-youtube, e-self-hosted-video, e-divider). IMPORTANT: atomic elements only persist on sites where the atomic experiment is active — call wp_elementor_capabilities first (the `atomic` field) or rely on this tool\'s built-in pre-check (run wp_bootstrap_elementor_writer once so the check is authoritative). To nest widgets inside a container, add the container first, then add children with position:{ parent_id: <returned element_id> }.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -4087,11 +4090,25 @@ async function executeTool(name, args, clientConfig = null) {
       if (args.focus_keyword !== undefined) rmMeta.rank_math_focus_keyword = args.focus_keyword;
       if (args.robots !== undefined) rmMeta.rank_math_robots = args.robots;
       const endpoint = args.post_type === 'page' ? 'pages' : 'posts';
-      await wpReq(`/wp/v2/${endpoint}/${args.id}`, {
+      const rmSaved = await wpReq(`/wp/v2/${endpoint}/${args.id}`, {
         method: 'POST',
         body: { meta: rmMeta }
       });
-      return { updated: true, id: args.id, fields: Object.keys(rmMeta) };
+      // WordPress silently drops meta keys that aren't registered for REST, so
+      // a 200 alone doesn't mean RankMath stored anything. Compare the echo.
+      const savedMeta = rmSaved?.meta || {};
+      const rmFailed = Object.entries(rmMeta)
+        .filter(([key, expected]) => !Object.prototype.hasOwnProperty.call(savedMeta, key) ||
+          JSON.stringify(savedMeta[key] ?? '') !== JSON.stringify(expected ?? ''))
+        .map(([key, expected]) => ({ key, expected, stored: savedMeta[key] }));
+      if (rmFailed.length) {
+        throw new Error(
+          `RankMath meta not stored for ${endpoint}/${args.id}: ${rmFailed.map(f => f.key in savedMeta
+            ? `${f.key} (expected ${JSON.stringify(f.expected)}, stored ${JSON.stringify(f.stored)})`
+            : `${f.key} (not exposed over REST — is RankMath active and its meta registered for REST?)`).join('; ')}`
+        );
+      }
+      return { updated: true, verified: true, id: args.id, fields: Object.keys(rmMeta) };
     }
 
     case 'wp_rankmath_get_meta': {
@@ -6244,7 +6261,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // GET /mcp — SSE fallback (mcporter uses this as fallback transport)
-  if (req.method === 'GET' && req.url === '/mcp') {
+  if (req.method === 'GET' && (req.url === '/mcp' || req.url.startsWith('/mcp?'))) {
     if (!requireApiKey(req, res, API_KEY)) return;
     const sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
     res.writeHead(200, {
@@ -6254,7 +6271,8 @@ const server = http.createServer(async (req, res) => {
       'Access-Control-Allow-Origin': '*',
       'Mcp-Session-Id': sessionId
     });
-    res.write(`event: endpoint\ndata: /mcp\n\n`);
+    // Echo the query (e.g. ?toolsets=) so the client's POSTs keep the same selection.
+    res.write(`event: endpoint\ndata: ${req.url}\n\n`);
     sseSessions.set(sessionId, res);
     const remoteIp = req.socket.remoteAddress;
     sseByIp.set(remoteIp, res);
@@ -6268,7 +6286,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Handle POST /mcp endpoint (MCP protocol)
-  if (req.method !== 'POST' || req.url !== '/mcp') {
+  const mcpUrl = new URL(req.url, 'http://localhost');
+  if (req.method !== 'POST' || mcpUrl.pathname !== '/mcp') {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({
       error: 'Not found',
@@ -6377,10 +6396,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (method === 'tools/list') {
+      const selected = parseToolsets(mcpUrl.searchParams.get('toolsets') ?? process.env.MCP_TOOLSETS);
       return sendResult(JSON.stringify({
         jsonrpc: '2.0',
         id,
-        result: { tools }
+        result: { tools: filterTools(tools, selected) }
       }));
     }
 
