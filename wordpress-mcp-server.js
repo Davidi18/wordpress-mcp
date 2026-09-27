@@ -826,7 +826,9 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post ID' }
+        id: { type: 'number', description: 'Post ID' },
+        include: { type: 'array', items: { type: 'string', enum: ['acf', 'meta', 'taxonomies'] }, description: 'Extra data to return: acf (ACF field values, same format `acf` writes accept), meta (registered post meta), taxonomies (category/tag IDs). Read ACF before overwriting it.' },
+        acf_format: { type: 'string', enum: ['light', 'standard'], description: 'ACF value format when include has acf. light (default) = raw stored values; standard = formatted like the theme renders them.' }
       },
       required: ['id']
     }
@@ -897,7 +899,9 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Page ID' }
+        id: { type: 'number', description: 'Page ID' },
+        include: { type: 'array', items: { type: 'string', enum: ['acf', 'meta', 'taxonomies'] }, description: 'Extra data to return: acf (ACF field values, same format `acf` writes accept), meta (registered post meta), taxonomies (category/tag IDs). Read ACF before overwriting it.' },
+        acf_format: { type: 'string', enum: ['light', 'standard'], description: 'ACF value format when include has acf. light (default) = raw stored values; standard = formatted like the theme renders them.' }
       },
       required: ['id']
     }
@@ -1137,7 +1141,9 @@ const tools = [
       type: 'object',
       properties: {
         post_type: { type: 'string', description: 'Custom post type slug' },
-        id: { type: 'number', description: 'Post ID' }
+        id: { type: 'number', description: 'Post ID' },
+        include: { type: 'array', items: { type: 'string', enum: ['acf', 'meta', 'taxonomies'] }, description: 'Extra data to return: acf (ACF field values, same format `acf` writes accept), meta (registered post meta), taxonomies (category/tag IDs). Read ACF before overwriting it.' },
+        acf_format: { type: 'string', enum: ['light', 'standard'], description: 'ACF value format when include has acf. light (default) = raw stored values; standard = formatted like the theme renders them.' }
       },
       required: ['post_type', 'id']
     }
@@ -2522,9 +2528,41 @@ ELEMENTOR EDITING — follow this workflow instead of hand-editing page JSON:
 
 5. SAFETY: every mutating Elementor tool returns \`previous_state\` and verifies the written byte length. To undo, pass that state to wp_restore_page_state. Elementor CSS is regenerated automatically after each write (via the Strudel module when present) — no manual regeneration step needed.
 
-ACF FIELDS: write them with the \`acf\` argument of wp_update_post / wp_update_page / wp_update_custom_post, or \`updates.acf\` in wp_bulk_update_posts (many posts). Never write ACF fields through \`meta\` — it can return 200 without changing the ACF value. ACF writes are read back and fail loudly if not stored.
+ACF FIELDS: read current values first with wp_get_post / wp_get_page / wp_get_custom_post and include: ["acf"]. Write them with the \`acf\` argument of wp_update_post / wp_update_page / wp_update_custom_post, or \`updates.acf\` in wp_bulk_update_posts (many posts). Never write ACF fields through \`meta\` — it can return 200 without changing the ACF value. ACF writes are read back and fail loudly if not stored.
 
 Anti-pattern to avoid: fetching a whole page and re-writing _elementor_data for a change a surgical tool already covers. The surgical tools preserve element ids, are cheaper, roll back, and self-verify.`;
+
+// Read a post plus opt-in extras (acf / meta / taxonomies). Extras use
+// context=edit so ACF and meta come back as stored — the same shape the
+// write path accepts — and a missing `acf` is reported, not silently omitted.
+async function readPostWithExtras(wpReq, restBase, args) {
+  const include = new Set(
+    (Array.isArray(args.include) ? args.include : String(args.include || '').split(','))
+      .map(s => String(s).trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (include.size === 0) {
+    return { post: await wpReq(`/wp/v2/${restBase}/${args.id}`), extras: {} };
+  }
+  const params = new URLSearchParams({ context: 'edit' });
+  if (include.has('acf') && args.acf_format) params.set('acf_format', args.acf_format);
+  const post = await wpReq(`/wp/v2/${restBase}/${args.id}?${params}`);
+  const extras = {};
+  if (include.has('acf')) {
+    if (post.acf && typeof post.acf === 'object') {
+      extras.acf = Array.isArray(post.acf) ? {} : post.acf;
+    } else {
+      extras.acf = null;
+      extras.acf_note = 'This post exposes no `acf` over REST (ACF missing, or the field group has "Show in REST API" off).';
+    }
+  }
+  if (include.has('meta')) extras.meta = post.meta || {};
+  if (include.has('taxonomies')) {
+    extras.categories = post.categories || [];
+    extras.tags = post.tags || [];
+  }
+  return { post, extras };
+}
 
 // Single write path for post updates. With `acf`, the write goes through
 // acf-writer (preflight + read-back verification) and throws on a silent drop.
@@ -2777,7 +2815,7 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_get_post': {
-      const post = await wpReq(`/wp/v2/posts/${args.id}`);
+      const { post, extras } = await readPostWithExtras(wpReq, 'posts', args);
       return { 
         id: post.id, 
         title: post.title.rendered, 
@@ -2785,7 +2823,8 @@ async function executeTool(name, args, clientConfig = null) {
         excerpt: post.excerpt.rendered,
         date: post.date,
         status: post.status,
-        link: post.link
+        link: post.link,
+        ...extras
       };
     }
 
@@ -2875,14 +2914,15 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_get_page': {
-      const page = await wpReq(`/wp/v2/pages/${args.id}`);
+      const { post: page, extras } = await readPostWithExtras(wpReq, 'pages', args);
       return {
         id: page.id,
         title: page.title.rendered,
         content: page.content.rendered,
         date: page.date,
         status: page.status,
-        link: page.link
+        link: page.link,
+        ...extras
       };
     }
 
@@ -4564,13 +4604,14 @@ async function executeTool(name, args, clientConfig = null) {
     }
 
     case 'wp_get_custom_post': {
-      const post = await wpReq(`/wp/v2/${args.post_type}/${args.id}`);
+      const { post, extras } = await readPostWithExtras(wpReq, args.post_type, args);
       return {
         id: post.id,
         title: post.title?.rendered || 'Untitled',
         content: post.content?.rendered,
         link: post.link,
-        status: post.status
+        status: post.status,
+        ...extras
       };
     }
 

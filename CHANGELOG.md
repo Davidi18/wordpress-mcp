@@ -6,6 +6,9 @@
 
 ## [Unreleased]
 
+### ✨ Added
+- **קריאת ACF / meta / טקסונומיות** — פרמטר `include: ["acf","meta","taxonomies"]` ב-`wp_get_post` / `wp_get_page` / `wp_get_custom_post` (+ `acf_format: light|standard`). מאפשר לסוכן לקרוא ערכים קיימים לפני שדורסים אותם. בלי `include` — הפלט זהה לקודם. אם אין `acf` ב-REST מוחזר `acf: null` עם הסבר.
+
 ### 🔒 Security
 - **הוסרה ברירת מחדל קשיחה של `DATABASE_URL`** (IP + סיסמה בקוד). בלי המשתנה — השרת עובר ל-ENV fallback. **לפני deploy: לוודא ש-`DATABASE_URL` מוגדר בסביבה.**
 
