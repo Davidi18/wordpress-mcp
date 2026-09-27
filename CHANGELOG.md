@@ -6,6 +6,9 @@
 
 ## [Unreleased]
 
+### ♻️ Refactor
+- **פיצול `wordpress-mcp-server.js`** (6,601 → ~850 שורות) ללא שינוי התנהגות: הגדרות הכלים ל-`tool-definitions/`, המימושים ל-`handlers/` (קובץ לכל toolset), רישום הלקוחות ל-`clients.js`, עזרי Elementor/פוסטים ל-`elementor-helpers.js` / `post-helpers.js`, ההנחיות ל-`server-instructions.js`. אומת ב-harness שמריץ את כל 123 הכלים מול WordPress מדומה ומשווה כל בקשה ותגובה ל-main, בנתיב ה-DB מול PostgreSQL אמיתי, ובשכבת ה-transport (auth, SSE, toolsets). בדיקה חדשה `handlers.test.js` מוודאת שלכל כלי מוגדר יש handler.
+
 ### ✨ Added
 - **Audit log** — כל קריאה לכלי כתיבה (create/update/delete/install; קריאות לא) נרשמת בטבלה `mcp_audit_log` ב-PostgreSQL: זמן, לקוח, אתר, כלי, מזהה יעד, הצלחה/שגיאה, משך, user-agent, ה-args (סודות מוסתרים), התוצאה, ו-`previous_state` כשהכלי לכד אותו (כלי Elementor/page-state; כתיבת ACF שומרת את הערכים הקודמים של השדות ששונו). כלי חדש `wp_audit_log` (toolset `core`, לא דורש `client`) לשאילתות. הלוג לעולם לא חוסם או מכשיל קריאה; בלי `DATABASE_URL` — no-op; `MCP_AUDIT_LOG=off` מכבה. רשומות ישנות מ-90 יום נמחקות אוטומטית (בהפעלה ופעם ביום); `MCP_AUDIT_RETENTION_DAYS` משנה, `0` = שמירה לתמיד. הטבלה נוצרת אוטומטית; אם לתפקיד אין הרשאת CREATE — backoff של 5 דקות ושגיאה אחת בלוג במקום בכל כתיבה.
 
