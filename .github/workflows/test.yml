@@ -15,5 +15,5 @@ jobs:
           node-version: 20 # matches the Dockerfile base image
       - run: npm install --no-audit --no-fund
       - name: Syntax check
-        run: for f in *.js; do node --check "$f"; done
+        run: for f in *.js handlers/*.js tool-definitions/*.js; do node --check "$f"; done
       - run: npm test

@@ -93,6 +93,20 @@
 
 ---
 
+## 🗂️ Code layout
+
+| Path | What lives there |
+|---|---|
+| `wordpress-mcp-server.js` | HTTP/MCP transport, auth, client routing, `executeTool` dispatcher, `/api/*` endpoints |
+| `tool-definitions/<toolset>.js` | Tool schemas served by `tools/list`, one file per toolset |
+| `handlers/<toolset>.js` | Tool implementations, one file per toolset (`toolsets.js` maps a tool name to its toolset) |
+| `clients.js` | Client registry (Agency OS PostgreSQL, ENV fallback) and the shared pg pool |
+| `elementor-helpers.js`, `post-helpers.js` | Shared plumbing used by several handlers |
+| `acf-writer.js`, `yoast-bulk-editor.js`, `elementor-*.js` | Domain modules with their own tests |
+| `audit-log.js`, `toolsets.js`, `mcp-hardening.js` | Cross-cutting: write log, tool filtering, auth/body limits/fetch retry |
+
+Adding a tool = a schema in `tool-definitions/<toolset>.js` + a `case` in `handlers/<toolset>.js`. `handlers.test.js` fails if a defined tool has no handler in its toolset.
+
 ## 🧰 Toolsets (limit tools per connector)
 
 The server exposes 120+ tools. Some MCP hosts truncate long tool lists, so an agent can silently lose tools. Pick only what a connector needs via the URL:
