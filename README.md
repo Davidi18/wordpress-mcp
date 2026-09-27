@@ -129,11 +129,11 @@ CREATE TABLE IF NOT EXISTS mcp_audit_log (
 );
 CREATE INDEX IF NOT EXISTS mcp_audit_log_client_time ON mcp_audit_log (client, created_at DESC);
 CREATE INDEX IF NOT EXISTS mcp_audit_log_target ON mcp_audit_log (target_id);
-GRANT SELECT, INSERT ON mcp_audit_log TO <mcp_role>;
+GRANT SELECT, INSERT, DELETE ON mcp_audit_log TO <mcp_role>;
 GRANT USAGE ON SEQUENCE mcp_audit_log_id_seq TO <mcp_role>;
 ```
 
-- Retention is up to you, e.g. `DELETE FROM mcp_audit_log WHERE created_at < now() - interval '90 days';`
+- Retention: entries older than 90 days are deleted automatically (at startup and daily). Change with `MCP_AUDIT_RETENTION_DAYS`; `0` keeps everything. The DB role needs `DELETE` on the table for this.
 
 ## 📊 Complete Endpoint Coverage
 

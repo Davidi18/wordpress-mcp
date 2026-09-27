@@ -99,3 +99,21 @@ test('backs off after the table cannot be created instead of failing every write
   await audit.record({ tool: 'wp_update_post', args: {} });
   assert.equal(calls, 2, 'retries after the backoff window');
 });
+
+test('prune deletes rows older than the retention window, 0 disables it', async () => {
+  const pool = fakePool();
+  pool.query = async (sql, params) => { pool.queries.push({ sql, params }); return { rows: [], rowCount: /DELETE/.test(sql) ? 3 : 0 }; };
+  const audit = createAuditLog({ getDb: async () => pool, log: { log: () => {}, error: () => {} } });
+  assert.equal(await audit.prune(90), 3);
+  const del = pool.queries.find(q => /DELETE FROM mcp_audit_log/.test(q.sql));
+  assert.deepEqual(del.params, [90]);
+  const before = pool.queries.length;
+  assert.equal(await audit.prune(0), 0);
+  assert.equal(await audit.prune('off'), 0);
+  assert.equal(pool.queries.length, before);
+});
+
+test('prune never throws', async () => {
+  const audit = createAuditLog({ getDb: async () => ({ query: async () => { throw new Error('down'); } }), log: { error: () => {} } });
+  assert.equal(await audit.prune(90), 0);
+});

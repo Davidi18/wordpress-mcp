@@ -90,6 +90,11 @@ async function initDatabase() {
 // Durable log of every write tool call (table mcp_audit_log). Needs DATABASE_URL;
 // MCP_AUDIT_LOG=off disables it. Never blocks or fails a tool call.
 const auditLog = createAuditLog({ getDb: initDatabase, enabled: process.env.MCP_AUDIT_LOG !== 'off' });
+// Retention: entries older than MCP_AUDIT_RETENTION_DAYS (default 90; 0 keeps
+// everything) are deleted at startup and then once a day.
+const AUDIT_RETENTION_DAYS = process.env.MCP_AUDIT_RETENTION_DAYS ?? '90';
+auditLog.prune(AUDIT_RETENTION_DAYS);
+setInterval(() => auditLog.prune(AUDIT_RETENTION_DAYS), 24 * 60 * 60 * 1000).unref();
 
 // Load clients from PostgreSQL
 async function loadClientsFromDB() {

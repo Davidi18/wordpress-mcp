@@ -178,5 +178,24 @@ export function createAuditLog({ getDb, enabled = true, log = console, now = Dat
     return rows;
   }
 
-  return { record, query };
+  // Delete rows older than `days`. 0/negative/invalid disables retention.
+  async function prune(days) {
+    const n = parseInt(days, 10);
+    if (!enabled || !(n > 0)) return 0;
+    try {
+      const pool = await db();
+      if (!pool) return 0;
+      const { rowCount } = await pool.query(
+        'DELETE FROM mcp_audit_log WHERE created_at < now() - make_interval(days => $1)',
+        [n]
+      );
+      if (rowCount) log.log?.(`🧹 audit log: removed ${rowCount} entries older than ${n} days`);
+      return rowCount || 0;
+    } catch (err) {
+      log.error?.(`⚠️ audit log retention failed: ${err.message}`);
+      return 0;
+    }
+  }
+
+  return { record, query, prune };
 }
