@@ -32,7 +32,8 @@ import {
   ATOMIC_CONTAINER_TYPES
 } from './elementor-atomic.js';
 import { ELEMENTOR_META_KEYS, SEO_META_KEYS, POST_NON_TAX_FIELDS } from './wp-meta-keys.js';
-import { getYoastMeta, updateYoastMeta } from './yoast-bulk-editor.js';
+import { getYoastMeta, updateYoastMeta, resolveYoastPostType } from './yoast-bulk-editor.js';
+import { updatePostWithAcf, acfFailureMessage } from './acf-writer.js';
 import {
   requireApiKey,
   readBodyWithLimit,
@@ -845,7 +846,7 @@ const tools = [
   },
   {
     name: 'wp_update_post',
-    description: 'Update an existing WordPress post',
+    description: 'Update an existing WordPress post. Supports ACF fields via `acf` (verified write).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -853,7 +854,9 @@ const tools = [
         title: { type: 'string', description: 'Post title' },
         content: { type: 'string', description: 'Post content (HTML)' },
         status: { type: 'string', description: 'Post status' },
-        excerpt: { type: 'string', description: 'Post excerpt' }
+        excerpt: { type: 'string', description: 'Post excerpt' },
+        meta: { type: 'object', description: 'Registered post meta (key-value). Not for ACF fields — use `acf`.' },
+        acf: { type: 'object', description: 'ACF fields to write via the REST `acf` key: { field_name: value }. Partial — only the fields sent change. "" or null clears a field. Values are read back and verified; the call fails if a field is not REST-exposed or was not stored. Do NOT use `meta` for ACF fields.' }
       },
       required: ['id']
     }
@@ -913,7 +916,7 @@ const tools = [
   },
   {
     name: 'wp_update_page',
-    description: 'Update an existing WordPress page',
+    description: 'Update an existing WordPress page. Supports ACF fields via `acf` (verified write).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -921,7 +924,9 @@ const tools = [
         title: { type: 'string', description: 'Page title' },
         content: { type: 'string', description: 'Page content (HTML)' },
         status: { type: 'string', description: 'Page status' },
-        excerpt: { type: 'string', description: 'Page excerpt. Pass an empty string "" to clear the existing excerpt.' }
+        excerpt: { type: 'string', description: 'Page excerpt. Pass an empty string "" to clear the existing excerpt.' },
+        meta: { type: 'object', description: 'Registered post meta (key-value). Not for ACF fields — use `acf`.' },
+        acf: { type: 'object', description: 'ACF fields to write via the REST `acf` key: { field_name: value }. Partial — only the fields sent change. "" or null clears a field. Values are read back and verified; the call fails if a field is not REST-exposed or was not stored. Do NOT use `meta` for ACF fields.' }
       },
       required: ['id']
     }
@@ -1154,7 +1159,7 @@ const tools = [
   },
   {
     name: 'wp_update_custom_post',
-    description: 'Update an existing custom post type entry (product, experience, etc). Supports Yoast SEO via yoast_title/yoast_desc/yoast_canonical.',
+    description: 'Update an existing custom post type entry (product, experience, etc). Supports ACF fields via `acf` and Yoast SEO via yoast_title/yoast_desc/yoast_canonical.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1165,7 +1170,8 @@ const tools = [
         content: { type: 'string', description: 'Post content (HTML)' },
         status: { type: 'string', description: 'Post status' },
         excerpt: { type: 'string', description: 'Post excerpt' },
-        meta: { type: 'object', description: 'Raw meta fields (key-value)' },
+        meta: { type: 'object', description: 'Raw meta fields (key-value). Not for ACF fields — use `acf`.' },
+        acf: { type: 'object', description: 'ACF fields to write via the REST `acf` key: { field_name: value }. Partial — only the fields sent change. "" or null clears a field. Values are read back and verified; the call fails if a field is not REST-exposed or was not stored. Do NOT use `meta` for ACF fields.' },
         yoast_title: { type: 'string', description: 'Yoast SEO title (yoast_wpseo_title)' },
         yoast_desc: { type: 'string', description: 'Yoast SEO meta description (yoast_wpseo_metadesc)' },
         yoast_canonical: { type: 'string', description: 'Yoast canonical URL (yoast_wpseo_canonical)' }
@@ -2332,25 +2338,27 @@ const tools = [
   // ── BULK OPERATIONS ──
   {
     name: 'wp_bulk_update_posts',
-    description: 'Update multiple posts/pages at once (change status, category, author, meta fields). Saves API calls.',
+    description: 'Apply the same updates to one or more posts/pages/CPT entries (status, categories, tags, author, meta, ACF fields). Per-post results; one failure does not hide the others. ACF writes (updates.acf) are verified by reading back the stored values.',
     inputSchema: {
       type: 'object',
       properties: {
-        ids: { type: 'array', items: { type: 'number' }, description: 'Array of post/page IDs to update' },
+        ids: { type: 'array', items: { type: 'number' }, description: 'Array of post IDs to update (alias: post_ids)' },
+        post_ids: { type: 'array', items: { type: 'number' }, description: 'Alias of ids' },
         updates: {
           type: 'object',
-          description: 'Fields to update on all items: status, categories, tags, author, meta, etc.',
+          description: 'Fields to update on all items: status, categories, tags, author, meta, acf, etc.',
           properties: {
             status: { type: 'string', description: 'draft, publish, pending, private, trash' },
             categories: { type: 'array', items: { type: 'number' }, description: 'Category IDs' },
             tags: { type: 'array', items: { type: 'number' }, description: 'Tag IDs' },
             author: { type: 'number', description: 'Author user ID' },
-            meta: { type: 'object', description: 'Meta fields to update' }
+            meta: { type: 'object', description: 'Registered post meta. Not for ACF fields — use acf.' },
+            acf: { type: 'object', description: 'ACF fields to write via the REST `acf` key: { field_name: value }. Partial — only the fields sent change. "" or null clears a field. Values are read back and verified; the call fails if a field is not REST-exposed or was not stored. Do NOT use `meta` for ACF fields.' }
           }
         },
-        post_type: { type: 'string', description: 'posts or pages', default: 'posts' }
+        post_type: { type: 'string', description: 'posts, pages, or a custom post type slug / REST base', default: 'posts' }
       },
-      required: ['ids', 'updates']
+      required: ['updates']
     }
   },
 
@@ -2511,7 +2519,25 @@ ELEMENTOR EDITING — follow this workflow instead of hand-editing page JSON:
 
 5. SAFETY: every mutating Elementor tool returns \`previous_state\` and verifies the written byte length. To undo, pass that state to wp_restore_page_state. Elementor CSS is regenerated automatically after each write (via the Strudel module when present) — no manual regeneration step needed.
 
+ACF FIELDS: write them with the \`acf\` argument of wp_update_post / wp_update_page / wp_update_custom_post, or \`updates.acf\` in wp_bulk_update_posts (many posts). Never write ACF fields through \`meta\` — it can return 200 without changing the ACF value. ACF writes are read back and fail loudly if not stored.
+
 Anti-pattern to avoid: fetching a whole page and re-writing _elementor_data for a change a surgical tool already covers. The surgical tools preserve element ids, are cheaper, roll back, and self-verify.`;
+
+// Single write path for post updates. With `acf`, the write goes through
+// acf-writer (preflight + read-back verification) and throws on a silent drop.
+async function writePost(wpReq, restBase, id, body, acf) {
+  if (acf === undefined) {
+    const post = await wpReq(`/wp/v2/${restBase}/${id}`, { method: 'POST', body });
+    return { post, acf: null };
+  }
+  const result = await updatePostWithAcf({ wpReq, restBase, id, acf, body });
+  if (!result.acf.success) {
+    const err = new Error(acfFailureMessage(restBase, id, result.acf));
+    err.acfVerification = result.acf;
+    throw err;
+  }
+  return result;
+}
 
 // Universal search function - finds ANY content type in WordPress
 async function findContent(searchParams, clientConfig) {
@@ -2807,11 +2833,9 @@ async function executeTool(name, args, clientConfig = null) {
         if (args.yoast_canonical !== undefined) updates.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
       }
 
-      const post = await wpReq(`/wp/v2/posts/${args.id}`, {
-        method: 'POST',
-        body: JSON.stringify(updates)
-      });
+      const { post, acf: acfUpdate } = await writePost(wpReq, 'posts', args.id, updates, args.acf);
       return {
+        ...(acfUpdate ? { acf_update: acfUpdate } : {}),
         id: post.id,
         title: post.title.rendered,
         slug: post.slug,
@@ -2902,11 +2926,9 @@ async function executeTool(name, args, clientConfig = null) {
         if (args.yoast_canonical !== undefined) updates.meta['yoast_wpseo_canonical'] = args.yoast_canonical;
       }
 
-      const page = await wpReq(`/wp/v2/pages/${args.id}`, {
-        method: 'POST',
-        body: JSON.stringify(updates)
-      });
+      const { post: page, acf: acfUpdate } = await writePost(wpReq, 'pages', args.id, updates, args.acf);
       return {
+        ...(acfUpdate ? { acf_update: acfUpdate } : {}),
         id: page.id,
         title: page.title.rendered,
         slug: page.slug,
@@ -3996,33 +4018,34 @@ async function executeTool(name, args, clientConfig = null) {
 
     // ── BULK OPERATIONS ──
     case 'wp_bulk_update_posts': {
-      const postType = args.post_type === 'pages' ? 'pages' : 'posts';
-      // Parse updates if passed as string
-      const updates = typeof args.updates === 'string' ? JSON.parse(args.updates) : args.updates;
-      // Parse ids if passed as string
-      const ids = typeof args.ids === 'string' ? JSON.parse(args.ids) : args.ids;
+      const parseMaybeJson = v => (typeof v === 'string' ? JSON.parse(v) : v);
+      const updates = parseMaybeJson(args.updates) || {};
+      const ids = parseMaybeJson(args.ids ?? args.post_ids);
+      if (!Array.isArray(ids) || ids.length === 0) {
+        throw new Error('ids (or post_ids) must be a non-empty array of post IDs.');
+      }
+      const { restBase } = await resolveYoastPostType({ wpReq, postType: args.post_type || 'posts' });
+      const { acf, ...coreUpdates } = updates;
       const results = [];
       // Process in batches of 5 to avoid rate limits
       for (let i = 0; i < ids.length; i += 5) {
         const batch = ids.slice(i, i + 5);
         const promises = batch.map(async (id) => {
           try {
-            await wpReq(`/wp/v2/${postType}/${id}`, {
-              method: 'POST',
-              body: updates
-            });
-            return { id, success: true };
+            const { acf: acfUpdate } = await writePost(wpReq, restBase, id, coreUpdates, acf);
+            return { id, success: true, ...(acfUpdate ? { acf: acfUpdate } : {}) };
           } catch (e) {
-            return { id, success: false, error: e.message };
+            return { id, success: false, error: e.message, ...(e.acfVerification ? { acf: e.acfVerification } : {}) };
           }
         });
         const batchResults = await Promise.all(promises);
         results.push(...batchResults);
-        if (i + 5 < args.ids.length) {
+        if (i + 5 < ids.length) {
           await new Promise(r => setTimeout(r, 500));
         }
       }
       return {
+        post_type: restBase,
         total: ids.length,
         succeeded: results.filter(r => r.success).length,
         failed: results.filter(r => !r.success).length,
@@ -4583,10 +4606,7 @@ async function executeTool(name, args, clientConfig = null) {
       if (args.excerpt !== undefined) postData.excerpt = args.excerpt;
       if (args.meta !== undefined) postData.meta = args.meta;
 
-      const post = await wpReq(`/wp/v2/${args.post_type}/${args.id}`, {
-        method: 'POST',
-        body: JSON.stringify(postData)
-      });
+      const { post, acf: acfUpdate } = await writePost(wpReq, args.post_type, args.id, postData, args.acf);
 
       let yoastUpdate = null;
       if (args.yoast_title !== undefined || args.yoast_desc !== undefined || args.yoast_canonical !== undefined) {
@@ -4608,6 +4628,7 @@ async function executeTool(name, args, clientConfig = null) {
         slug: post.slug,
         modified: post.modified,
         meta: post.meta,
+        ...(acfUpdate ? { acf_update: acfUpdate } : {}),
         yoast_update: yoastUpdate
       };
     }
