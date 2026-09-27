@@ -6,6 +6,9 @@
 
 ## [Unreleased]
 
+### 🐛 Fixed
+- **`fetchWithRetry`** — `WP_FETCH_MAX_RETRIES=0` גרם לכך שבקשות GET לא נשלחו בכלל (`attempts = maxRetries`). עכשיו תמיד לפחות ניסיון אחד. ברירת המחדל (3) לא השתנתה; לוג ההפעלה מתאר נכון "עד 3 ניסיונות". בדיקות: `mcp-hardening.test.js`.
+
 ### ♻️ Refactor
 - **פיצול `wordpress-mcp-server.js`** (6,601 → ~850 שורות) ללא שינוי התנהגות: הגדרות הכלים ל-`tool-definitions/`, המימושים ל-`handlers/` (קובץ לכל toolset), רישום הלקוחות ל-`clients.js`, עזרי Elementor/פוסטים ל-`elementor-helpers.js` / `post-helpers.js`, ההנחיות ל-`server-instructions.js`. אומת ב-harness שמריץ את כל 123 הכלים מול WordPress מדומה ומשווה כל בקשה ותגובה ל-main, בנתיב ה-DB מול PostgreSQL אמיתי, ובשכבת ה-transport (auth, SSE, toolsets). בדיקה חדשה `handlers.test.js` מוודאת שלכל כלי מוגדר יש handler.
 

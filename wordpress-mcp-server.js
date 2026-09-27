@@ -838,7 +838,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`📋 Clients: GET /api/clients`);
   console.log(`🔐 API Key: ${API_KEY ? 'Enabled ✅ (enforced on /mcp + /api/*)' : 'Disabled ⚠️'}`);
   console.log(`📏 Max body: ${(DEFAULT_MAX_BODY_BYTES / 1024 / 1024).toFixed(0)} MB`);
-  console.log(`⏱️  WP fetch: ${DEFAULT_FETCH_TIMEOUT_MS}ms timeout, ${DEFAULT_FETCH_MAX_RETRIES}x retry on 429/5xx (GET only)`);
+  console.log(`⏱️  WP fetch: ${DEFAULT_FETCH_TIMEOUT_MS}ms timeout, up to ${Math.max(1, DEFAULT_FETCH_MAX_RETRIES)} attempts on 429/5xx (GET only)`);
   console.log(`🗄️  Database: ${DATABASE_URL ? 'Configured' : 'Not configured (ENV fallback)'}`);
   console.log(`🛠️  Available MCP tools: ${tools.length}`);
 });

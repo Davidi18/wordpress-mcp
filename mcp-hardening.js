@@ -123,7 +123,9 @@ export async function fetchWithRetry(url, init = {}, {
 } = {}) {
   const method = (init.method || 'GET').toUpperCase();
   const safe = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
-  const attempts = safe ? maxRetries : 1;
+  // maxRetries is the total number of attempts for safe methods; never fewer
+  // than one, or WP_FETCH_MAX_RETRIES=0 would silently skip every GET.
+  const attempts = safe ? Math.max(1, maxRetries) : 1;
   let lastError;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
