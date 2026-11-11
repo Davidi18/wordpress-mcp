@@ -55,6 +55,26 @@ export async function resolveYoastPostType({ wpReq, postType = 'post', restBase 
   return { ...normalized, source: 'same_slug_fallback' };
 }
 
+export async function resolveYoastObject({ wpReq, postType = 'post', restBase, objectType } = {}) {
+  const requested = validateTypeSlug(postType || 'post', 'post_type');
+  const explicitRestBase = restBase === undefined ? null : validateTypeSlug(restBase, 'rest_base');
+  const taxonomyHint = objectType === 'term' || ['category', 'categories', 'post_tag', 'tags'].includes(requested) || ['categories', 'tags'].includes(explicitRestBase);
+  if (taxonomyHint) try {
+    const taxonomies = await wpReq('/wp/v2/taxonomies');
+    for (const [key, value] of Object.entries(taxonomies || {})) {
+      try {
+        const taxonomy = validateTypeSlug(value?.slug || key, 'discovered taxonomy');
+        const taxonomyRestBase = validateTypeSlug(value?.rest_base || taxonomy, 'discovered rest_base');
+        if (requested === key || requested === taxonomy || requested === taxonomyRestBase || explicitRestBase === taxonomyRestBase) {
+          return { objectType: 'term', taxonomy, restBase: explicitRestBase || taxonomyRestBase, source: explicitRestBase ? 'explicit_taxonomy' : 'wp_taxonomies' };
+        }
+      } catch {}
+    }
+  } catch {}
+  const post = await resolveYoastPostType({ wpReq, postType, restBase });
+  return { objectType: 'post', ...post };
+}
+
 function assertBulkResult(response, id, operation) {
   const result = response?.results?.find(item => Number(item?.id) === Number(id));
   if (!result?.success) {
@@ -102,11 +122,31 @@ export async function updateYoastMeta({
   id,
   postType = 'post',
   restBase,
+  objectType,
   touch = true,
   verify = true,
   ...fields
 }) {
-  const resolved = await resolveYoastPostType({ wpReq, postType, restBase });
+  const resolvedObject = await resolveYoastObject({ wpReq, postType, restBase, objectType });
+  if (resolvedObject.objectType === 'term') {
+    const supplied = expectedFields(fields);
+    if (Object.keys(supplied).length === 0) throw new Error('No Yoast fields supplied.');
+    const response = await wpReq('/agency-os/v1/yoast-term-meta', {
+      method: 'POST',
+      body: { taxonomy: resolvedObject.taxonomy, term_id: Number(id), ...supplied }
+    });
+    const readback = response?.meta || {};
+    const verification = compareReadback(supplied, readback);
+    return {
+      updated: true, id: Number(id), object_type: 'term',
+      taxonomy: resolvedObject.taxonomy, rest_base: resolvedObject.restBase,
+      type_resolution: resolvedObject.source, methods: ['yoast_taxonomy_meta'],
+      verified: verify ? Object.keys(verification.mismatched).length === 0 : null,
+      verification: verify ? verification : { skipped: true },
+      readback: verify ? readback : undefined
+    };
+  }
+  const resolved = resolvedObject;
   const { contentType, restBase: resolvedRestBase } = resolved;
   const methods = [];
   const protectedMeta = {};
@@ -218,8 +258,18 @@ export async function updateYoastMeta({
   }
 }
 
-export async function getYoastMeta({ wpReq, id, postType = 'post', restBase } = {}) {
-  const resolved = await resolveYoastPostType({ wpReq, postType, restBase });
+export async function getYoastMeta({ wpReq, id, postType = 'post', restBase, objectType } = {}) {
+  const resolvedObject = await resolveYoastObject({ wpReq, postType, restBase, objectType });
+  if (resolvedObject.objectType === 'term') {
+    const params = new URLSearchParams({ taxonomy: resolvedObject.taxonomy, term_id: String(Number(id)) });
+    const response = await wpReq(`/agency-os/v1/yoast-term-meta?${params.toString()}`);
+    return {
+      id: Number(id), object_type: 'term', taxonomy: resolvedObject.taxonomy,
+      rest_base: resolvedObject.restBase, type_resolution: resolvedObject.source,
+      ...(response?.meta || {}), source: 'wpseo_taxonomy_meta'
+    };
+  }
+  const resolved = resolvedObject;
   const { contentType, restBase: resolvedRestBase } = resolved;
   const post = await wpReq(`/wp/v2/${resolvedRestBase}/${id}?context=edit&_fields=id,title,meta,yoast_head_json`);
   const postTitle = post?.title?.raw ?? post?.title?.rendered ?? '';
