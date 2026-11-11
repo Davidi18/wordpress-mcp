@@ -51,7 +51,13 @@ function agency_os_update_yoast_term_meta($r) {
     foreach($map as $input=>$key) if($r->has_param($input)) $raw[$key]=sanitize_text_field((string)$r->get_param($input));
     if($r->has_param('robots_noindex'))$raw['wpseo_noindex']=$r->get_param('robots_noindex')?'noindex':'index';
     if($r->has_param('robots_nofollow'))$raw['wpseo_nofollow']=$r->get_param('robots_nofollow')?'nofollow':'follow';
-    $all[$taxonomy][$term_id]=$raw; update_option('wpseo_taxonomy_meta',$all,false); clean_term_cache($term_id,$taxonomy);
+    if (class_exists('WPSEO_Taxonomy_Meta') && method_exists('WPSEO_Taxonomy_Meta', 'set_values')) {
+        WPSEO_Taxonomy_Meta::set_values($term_id, $taxonomy, $raw);
+    } else {
+        $all[$taxonomy][$term_id]=$raw; update_option('wpseo_taxonomy_meta',$all,false);
+    }
+    $term=get_term($term_id,$taxonomy); if($term && !is_wp_error($term)) wp_update_term($term_id,$taxonomy,['name'=>$term->name]);
+    clean_term_cache($term_id,$taxonomy);
     return ['updated'=>true,'taxonomy'=>$taxonomy,'term_id'=>$term_id,'meta'=>agency_os_yoast_term_values($taxonomy,$term_id)];
 }`;
       let existing = null;
