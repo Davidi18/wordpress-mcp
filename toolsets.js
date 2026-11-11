@@ -30,7 +30,7 @@ export function toolsetOf(name) {
   if (CORE.has(name)) return 'core';
   if (name.startsWith('wc_')) return 'woo';
   if (name.startsWith('wp_elementor_') || ELEMENTOR_EXTRA.has(name)) return 'elementor';
-  if (/^wp_(rankmath|yoast)_/.test(name) || /^wp_(get|create)_redirects?$/.test(name)) return 'seo';
+  if (/^wp_(rankmath|yoast)_/.test(name) || name === 'wp_bootstrap_yoast_term_writer' || /^wp_(get|create)_redirects?$/.test(name)) return 'seo';
   if (ADMIN.has(name) || /_(plugin|plugins|plugin_zip|snippet|snippets)$/.test(name)) return 'admin';
   return 'content';
 }

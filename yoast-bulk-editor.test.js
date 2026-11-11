@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getYoastMeta, normalizeYoastPostType, resolveYoastPostType, updateYoastMeta } from './yoast-bulk-editor.js';
+import { getYoastMeta, normalizeYoastPostType, resolveYoastObject, resolveYoastPostType, updateYoastMeta } from './yoast-bulk-editor.js';
 
 test('normalizes core and custom post types', () => {
   assert.deepEqual(normalizeYoastPostType('page'), { contentType: 'page', restBase: 'pages' });
@@ -35,6 +35,51 @@ test('uses an explicit REST base without discovery', async () => {
     await resolveYoastPostType({ wpReq, postType: 'service', restBase: 'custom-services' }),
     { contentType: 'service', restBase: 'custom-services', source: 'explicit' }
   );
+});
+
+test('discovers category terms by taxonomy REST base', async () => {
+  const wpReq = async endpoint => {
+    assert.equal(endpoint, '/wp/v2/taxonomies');
+    return { category: { slug: 'category', rest_base: 'categories' } };
+  };
+  assert.deepEqual(await resolveYoastObject({ wpReq, postType: 'category', restBase: 'categories' }), {
+    objectType: 'term', taxonomy: 'category', restBase: 'categories', source: 'explicit_taxonomy'
+  });
+});
+
+test('updates and verifies Yoast taxonomy meta through the authenticated route', async () => {
+  const calls = [];
+  const wpReq = async (endpoint, options = {}) => {
+    calls.push({ endpoint, options });
+    if (endpoint === '/wp/v2/taxonomies') return { category: { slug: 'category', rest_base: 'categories' } };
+    if (endpoint === '/agency-os/v1/yoast-term-meta') {
+      return { updated: true, meta: { title: 'Term SEO title', description: 'Term SEO description' } };
+    }
+    throw new Error(`Unexpected endpoint ${endpoint}`);
+  };
+  const result = await updateYoastMeta({
+    wpReq, id: 20, postType: 'category', restBase: 'categories',
+    title: 'Term SEO title', description: 'Term SEO description'
+  });
+  assert.equal(result.object_type, 'term');
+  assert.equal(result.verified, true);
+  assert.deepEqual(result.methods, ['yoast_taxonomy_meta']);
+  assert.deepEqual(calls[1].options.body, {
+    taxonomy: 'category', term_id: 20, title: 'Term SEO title', description: 'Term SEO description'
+  });
+});
+
+test('reads Yoast taxonomy meta through the authenticated route', async () => {
+  const wpReq = async endpoint => {
+    if (endpoint === '/wp/v2/taxonomies') return { category: { slug: 'category', rest_base: 'categories' } };
+    if (endpoint === '/agency-os/v1/yoast-term-meta?taxonomy=category&term_id=33') {
+      return { meta: { title: 'Stored term title', description: 'Stored term description' } };
+    }
+    throw new Error(`Unexpected endpoint ${endpoint}`);
+  };
+  const result = await getYoastMeta({ wpReq, id: 33, postType: 'category', restBase: 'categories' });
+  assert.equal(result.source, 'wpseo_taxonomy_meta');
+  assert.equal(result.title, 'Stored term title');
 });
 
 test('updates a service title through Yoast Bulk Editor and touches the CPT', async () => {

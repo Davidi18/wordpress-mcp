@@ -42,14 +42,20 @@ export default [
     }
   },
   {
+    name: 'wp_bootstrap_yoast_term_writer',
+    description: 'Install or refresh the authenticated agency-os/v1/yoast-term-meta route as an active Code Snippet. Required once per site before Yoast taxonomy-term writes.',
+    inputSchema: { type: 'object', properties: { force: { type: 'boolean', default: false } } }
+  },
+  {
     name: 'wp_yoast_update_meta',
-    description: 'Update Yoast SEO metadata through Yoast Bulk Editor APIs for posts, pages, and public custom post types.',
+    description: 'Update Yoast SEO metadata for posts/pages/public CPTs and public taxonomy terms (for example post_type=category, rest_base=categories).',
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post/page/custom-post ID' },
-        post_type: { type: 'string', description: 'WordPress content type, e.g. post, page, service', default: 'post' },
+        id: { type: 'number', description: 'Post/page/custom-post/term ID' },
+        post_type: { type: 'string', description: 'WordPress content type or taxonomy, e.g. post, page, service, category', default: 'post' },
         rest_base: { type: 'string', description: 'Optional explicit WordPress REST base when it differs from post_type; otherwise auto-discovered from /wp/v2/types' },
+        object_type: { type: 'string', enum: ['post', 'term'], description: 'Use term for custom taxonomies; category and post_tag are auto-detected' },
         verify: { type: 'boolean', description: 'Read back and compare supplied fields after writing', default: true },
         title: { type: 'string', description: 'SEO title' },
         description: { type: 'string', description: 'Meta description' },
@@ -65,13 +71,14 @@ export default [
   },
   {
     name: 'wp_yoast_get_meta',
-    description: 'Get stored Yoast metadata for a post, page, or public custom post type by ID.',
+    description: 'Get stored Yoast metadata for a post, page, public custom post type, or public taxonomy term by ID.',
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'number', description: 'Post/page/custom-post ID' },
-        post_type: { type: 'string', description: 'WordPress content type, e.g. post, page, service', default: 'post' },
-        rest_base: { type: 'string', description: 'Optional explicit WordPress REST base when it differs from post_type; otherwise auto-discovered from /wp/v2/types' }
+        id: { type: 'number', description: 'Post/page/custom-post/term ID' },
+        post_type: { type: 'string', description: 'WordPress content type or taxonomy, e.g. post, page, service, category', default: 'post' },
+        rest_base: { type: 'string', description: 'Optional explicit WordPress REST base when it differs from post_type; otherwise auto-discovered from /wp/v2/types' },
+        object_type: { type: 'string', enum: ['post', 'term'], description: 'Use term for custom taxonomies; category and post_tag are auto-detected' }
       },
       required: ['id']
     }

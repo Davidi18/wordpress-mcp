@@ -8,6 +8,68 @@ export async function handleSeo(name, args, ctx) {
   const { wpReq } = ctx;
   switch (name) {
 
+    case 'wp_bootstrap_yoast_term_writer': {
+      const routeLive = async () => {
+        try {
+          await wpReq('/agency-os/v1/yoast-term-meta?taxonomy=category&term_id=0', { timeoutMs: 12000 });
+          return true;
+        } catch (error) {
+          return !error.message.includes('rest_no_route');
+        }
+      };
+      if (!args.force && await routeLive()) return { success: true, verified: true, message: 'Yoast term-meta route already installed' };
+
+      const snippetName = 'Agency OS Yoast Term Meta Writer';
+      const snippetCode = `if (!defined('ABSPATH')) exit;
+add_action('rest_api_init', function() {
+    register_rest_route('agency-os/v1', '/yoast-term-meta', [
+        ['methods' => 'GET', 'callback' => 'agency_os_get_yoast_term_meta', 'permission_callback' => function() { return current_user_can('edit_posts'); }],
+        ['methods' => 'POST', 'callback' => 'agency_os_update_yoast_term_meta', 'permission_callback' => function() { return current_user_can('edit_posts'); }],
+    ]);
+});
+function agency_os_yoast_term_target($r) {
+    $taxonomy = sanitize_key($r->get_param('taxonomy')); $term_id = absint($r->get_param('term_id')); $tax = get_taxonomy($taxonomy);
+    if (!$tax || !$tax->public || !$tax->show_in_rest) return new WP_Error('invalid_taxonomy', 'Public REST taxonomy not found', ['status' => 404]);
+    $term = get_term($term_id, $taxonomy);
+    if (!$term_id || !$term || is_wp_error($term)) return new WP_Error('invalid_term', 'Term not found', ['status' => 404]);
+    if (!current_user_can('edit_term', $term_id)) return new WP_Error('forbidden', 'Cannot edit this term', ['status' => 403]);
+    return [$taxonomy, $term_id];
+}
+function agency_os_yoast_term_values($taxonomy, $term_id) {
+    $all = get_option('wpseo_taxonomy_meta', []); $raw = isset($all[$taxonomy][$term_id]) && is_array($all[$taxonomy][$term_id]) ? $all[$taxonomy][$term_id] : [];
+    return ['title'=>(string)($raw['wpseo_title']??''),'description'=>(string)($raw['wpseo_desc']??''),'focus_keyword'=>(string)($raw['wpseo_focuskw']??''),'robots_noindex'=>(($raw['wpseo_noindex']??'')==='noindex'),'robots_nofollow'=>(($raw['wpseo_nofollow']??'')==='nofollow'),'canonical'=>(string)($raw['wpseo_canonical']??''),'og_title'=>(string)($raw['wpseo_opengraph-title']??''),'og_description'=>(string)($raw['wpseo_opengraph-description']??'')];
+}
+function agency_os_get_yoast_term_meta($r) {
+    $target = agency_os_yoast_term_target($r); if (is_wp_error($target)) return $target;
+    return ['taxonomy'=>$target[0], 'term_id'=>$target[1], 'meta'=>agency_os_yoast_term_values($target[0], $target[1])];
+}
+function agency_os_update_yoast_term_meta($r) {
+    $target = agency_os_yoast_term_target($r); if (is_wp_error($target)) return $target; list($taxonomy,$term_id)=$target;
+    $all=get_option('wpseo_taxonomy_meta',[]); if(!is_array($all))$all=[]; if(!isset($all[$taxonomy])||!is_array($all[$taxonomy]))$all[$taxonomy]=[];
+    $raw=isset($all[$taxonomy][$term_id])&&is_array($all[$taxonomy][$term_id])?$all[$taxonomy][$term_id]:[];
+    $map=['title'=>'wpseo_title','description'=>'wpseo_desc','focus_keyword'=>'wpseo_focuskw','canonical'=>'wpseo_canonical','og_title'=>'wpseo_opengraph-title','og_description'=>'wpseo_opengraph-description'];
+    foreach($map as $input=>$key) if($r->has_param($input)) $raw[$key]=sanitize_text_field((string)$r->get_param($input));
+    if($r->has_param('robots_noindex'))$raw['wpseo_noindex']=$r->get_param('robots_noindex')?'noindex':'index';
+    if($r->has_param('robots_nofollow'))$raw['wpseo_nofollow']=$r->get_param('robots_nofollow')?'nofollow':'follow';
+    $all[$taxonomy][$term_id]=$raw; update_option('wpseo_taxonomy_meta',$all,false); clean_term_cache($term_id,$taxonomy);
+    return ['updated'=>true,'taxonomy'=>$taxonomy,'term_id'=>$term_id,'meta'=>agency_os_yoast_term_values($taxonomy,$term_id)];
+}`;
+      let existing = null;
+      try {
+        const snippets = await wpReq('/code-snippets/v1/snippets');
+        existing = (Array.isArray(snippets) ? snippets : []).find(s => s.name === snippetName) || null;
+      } catch (error) {
+        if (error.message.includes('rest_no_route')) return { success: false, verified: false, error: 'Code Snippets REST API not found.' };
+        throw error;
+      }
+      const snippet = existing
+        ? await wpReq(`/code-snippets/v1/snippets/${existing.id}`, { method: 'POST', body: { name: snippetName, code: snippetCode, scope: 'global', active: true } })
+        : await wpReq('/code-snippets/v1/snippets', { method: 'POST', body: { name: snippetName, desc: 'Authenticated Yoast taxonomy-term metadata route for WordPress MCP.', code: snippetCode, scope: 'global', active: true } });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const verified = await routeLive();
+      return { success: verified, verified, via: 'code-snippet', snippet_id: snippet.id ?? existing?.id };
+    }
+
     // ── RANKMATH SEO ──
     case 'wp_rankmath_update_meta': {
       const rmMeta = {};
@@ -75,6 +137,7 @@ export async function handleSeo(name, args, ctx) {
         id: args.id,
         postType: args.post_type || 'post',
         restBase: args.rest_base,
+        objectType: args.object_type,
         verify: args.verify !== false,
         title: args.title,
         description: args.description,
@@ -93,7 +156,8 @@ export async function handleSeo(name, args, ctx) {
         wpReq,
         id: args.id,
         postType: args.post_type || 'post',
-        restBase: args.rest_base
+        restBase: args.rest_base,
+        objectType: args.object_type
       });
     }
 
